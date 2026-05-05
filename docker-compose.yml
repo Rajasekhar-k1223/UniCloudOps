@@ -1,0 +1,137 @@
+services:
+  # --- NEW: Managed MySQL Database with Persistence ---
+  db:
+    image: mysql:8.0
+    container_name: unicloudops_mysql
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=MySqlRoot!2025#Secure
+      - MYSQL_DATABASE=unicloudops
+      - MYSQL_USER=appuser
+      - MYSQL_PASSWORD=MySqlApp!2025#Secure
+    ports:
+      - "43306:3306"
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uappuser", "-pMySqlApp!2025#Secure"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --- NEW: Managed MongoDB with Persistence ---
+  mongodb:
+    image: mongo:6.0
+    container_name: unicloudops_mongo
+    restart: always
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=Mongo!2025#Secure
+      - MONGO_INITDB_DATABASE=unicloudops
+    ports:
+      - "37017:27017"
+    volumes:
+      - ./data/mongo:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --- Multi-purpose Redis Broker ---
+  redis:
+    image: redis:7.0-alpine
+    container_name: unicloudops_redis
+    command: redis-server --requirepass Redis!2025#Secure
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "Redis!2025#Secure", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    container_name: unicloudops_backend
+    ports:
+      - "8085:8085"
+    depends_on:
+      db:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=mysql+pymysql://appuser:MySqlApp!2025%23Secure@db:3306/unicloudops
+      - MONGO_URL=mongodb://admin:Mongo!2025%23Secure@mongodb:27017/unicloudops?authSource=admin
+      - REDIS_URL=redis://:Redis!2025%23Secure@redis:6379/0
+      - JWT_SECRET=supersecretkey_change_in_production
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    restart: on-failure
+    volumes:
+      - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  worker:
+    build:
+      context: ./backend
+    container_name: unicloudops_worker
+    command: celery -A app.core.celery_app worker --loglevel=info
+    environment:
+      - DATABASE_URL=mysql+pymysql://appuser:MySqlApp!2025%23Secure@db:3306/unicloudops
+      - MONGO_URL=mongodb://admin:Mongo!2025%23Secure@mongodb:27017/unicloudops?authSource=admin
+      - REDIS_URL=redis://:Redis!2025%23Secure@redis:6379/0
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      db:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: on-failure
+
+  beat:
+    build: 
+      context: ./backend
+    container_name: unicloudops_beat
+    command: celery -A app.core.celery_app beat --loglevel=info
+    environment:
+      - DATABASE_URL=mysql+pymysql://appuser:MySqlApp!2025%23Secure@db:3306/unicloudops
+      - REDIS_URL=redis://:Redis!2025%23Secure@redis:6379/0
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    restart: on-failure
+
+  guacd:
+    image: guacamole/guacd:latest
+    container_name: unicloudops-guacd
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: unicloudops_frontend
+    ports:
+      - "5175:80"
+    depends_on:
+      - backend
+    restart: on-failure
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - CHOKIDAR_USEPOLLING=true
