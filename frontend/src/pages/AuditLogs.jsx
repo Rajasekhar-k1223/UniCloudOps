@@ -73,7 +73,7 @@ const AuditLogs = () => {
           </select>
         </div>
 
-        <div className="border border-gray-100 rounded-2xl overflow-hidden">
+        <div className="border border-gray-100 rounded-2xl overflow-x-auto custom-scrollbar">
           <table className="min-w-full divide-y divide-gray-100">
             <thead className="bg-slate-50">
               <tr>

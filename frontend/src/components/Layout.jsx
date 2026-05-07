@@ -14,10 +14,11 @@ const Layout = () => {
 
   const navigation = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+    { name: 'Blueprint Studio', href: '/blueprint-studio', icon: Code },
     { name: 'HQ Command Mode', href: '/command-center', icon: Globe },
     { name: 'Resources', href: '/resources', icon: Server },
     { name: 'App Marketplace', href: '/marketplace', icon: ShoppingCart },
-    { name: 'Kubernetes', href: '/kubernetes', icon: Box },
+    { name: 'K8s Fleet Command', href: '/kubernetes', icon: Box },
     { name: 'Serverless', href: '/serverless', icon: Cpu },
     { name: 'Security Pulse', href: '/security-pulse', icon: ShieldAlert },
     { name: 'DR Command', href: '/dr', icon: Power },

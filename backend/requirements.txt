@@ -22,7 +22,9 @@ azure-mgmt-network==25.2.0
 azure-mgmt-resource==23.1.0
 azure-mgmt-costmanagement==4.0.0
 google-cloud-billing==1.17.0
-google-cloud-compute==1.19.0
+google-cloud-compute==1.47.0
+google-cloud-container==2.64.0
+google-cloud-functions==1.23.0
 google-cloud-resource-manager==1.12.3
 requests==2.31.0
 pytest==8.3.5

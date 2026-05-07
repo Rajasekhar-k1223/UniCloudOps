@@ -76,6 +76,7 @@ from app.routes.audit import router as audit_router
 from app.routes.webhooks import router as webhooks_router
 from app.routes.network import router as network_router
 from app.routes.services import router as services_router
+from app.routes.marketplace import router as marketplace_router
 
 app.include_router(auth_router, prefix=settings.API_V1_STR)
 app.include_router(cloud_accounts_router, prefix=settings.API_V1_STR)
@@ -89,6 +90,22 @@ app.include_router(audit_router, prefix=settings.API_V1_STR)
 app.include_router(webhooks_router, prefix=settings.API_V1_STR)
 app.include_router(network_router, prefix=settings.API_V1_STR)
 app.include_router(services_router, prefix=f"{settings.API_V1_STR}/services", tags=["Universal Services"])
+from app.routes.serverless import router as serverless_router
+app.include_router(serverless_router, prefix=settings.API_V1_STR)
+from app.routes.marketplace import router as marketplace_router
+from app.routes.k8s import router as k8s_router
+
+app.include_router(marketplace_router, prefix=settings.API_V1_STR)
+app.include_router(k8s_router, prefix=settings.API_V1_STR)
+
+from app.routes.dr import router as dr_router
+app.include_router(dr_router, prefix=settings.API_V1_STR)
+
+from app.routes.security import router as security_router
+app.include_router(security_router, prefix=settings.API_V1_STR)
+
+from app.routes.rightsizing import router as rightsizing_router
+app.include_router(rightsizing_router, prefix=settings.API_V1_STR)
 
 # Compatibility route for unrebuilt frontend
 from app.routes.resources import rdp_websocket

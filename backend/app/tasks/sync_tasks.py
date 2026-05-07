@@ -25,7 +25,14 @@ def sync_cloud_resources_logic(account_id: int, db: SessionLocal):
         return
 
     try:
-        scanned_resources = adapter.sync_resources(account)
+        scanned_resources = adapter.sync_resources(account) or []
+        # 🛸 Tactical Fleet Discovery: Fetch Kubernetes Clusters 🛸
+        clusters = adapter.get_clusters(account) or []
+        scanned_resources.extend(clusters)
+        
+        # 🌐 Topology Discovery: Fetch VPCs and VNets 🌐
+        networks = adapter.get_networks(account) or []
+        scanned_resources.extend(networks)
     except Exception as e:
         logger.error(f"Adapter sync failed for account {account_id} ({account.provider}): {e}")
         # Re-raise to be handled by the task wrapper (sets account status to error)
@@ -121,6 +128,7 @@ def sync_cloud_resources(account_id: int):
     try:
         sync_cloud_resources_logic(account_id, db)
     except Exception as e:
+        db.rollback()
         logger.error(f"Error during sync for account {account_id}: {e}")
         if account:
             account.status = "error"

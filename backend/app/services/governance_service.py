@@ -22,6 +22,19 @@ class GovernanceService:
             "cost_idle_db": self.check_idle_database
         }
 
+    def _get_meta_val(self, meta: Dict, *keys: str):
+        """Tactical helper to find a value in metadata regardless of case or provider-specific naming."""
+        if not meta: return None
+        for k in keys:
+            # Check direct match
+            if k in meta: return meta[k]
+            # Check PascalCase (AWS)
+            pascal = "".join([w.capitalize() for w in k.split("_")])
+            if pascal in meta: return meta[pascal]
+            # Check lowercase
+            if k.lower() in meta: return meta[k.lower()]
+        return None
+
     def check_custom_policy(self, res: Resource):
         """Evaluate a resource against a custom JSON schema or property set."""
         # Simple property-based rule evaluator
@@ -170,12 +183,11 @@ class GovernanceService:
     def check_open_ssh(self, res: Resource):
         """Check for potentially insecure SSH exposure."""
         meta = res.cloud_metadata or {}
-        sgs = meta.get('security_groups', [])
+        sgs = self._get_meta_val(meta, 'security_groups')
         
-        # This is a simplified check for demo purposes
-        # Actual check would involve parsing SG rules from the provider adapter
+        # This is a tactical heuristic: if the resource is public, we flag it for auditing
         if res.public_ip != "N/A":
-            return "fail", "Resource has a public IP; likely exposed if SSH rules are default.", {"public_ip": res.public_ip}
+            return "fail", "Resource has a public IP; likely exposed if SSH rules are default.", {"public_ip": res.public_ip, "has_sgs": sgs is not None}
         return "pass", "Resource is not publicly routed.", {}
 
     def remediate_ssh(self, db: Session, res: Resource, meta: Dict):
@@ -194,9 +206,20 @@ class GovernanceService:
         return False, f"Adapter Failure: {result.get('message', 'Unknown Error')}"
 
     def check_missing_tags(self, res: Resource):
-        """Check for mandatory governance tags."""
+        """Check for mandatory governance tags across AWS/Azure/GCP schemas."""
         meta = res.cloud_metadata or {}
-        tags = meta.get('tags', {})
+        raw_tags = self._get_meta_val(meta, 'tags') or {}
+        
+        # Normalize tags to a dict if it's a list (e.g. some Azure/GCP responses)
+        tags = {}
+        if isinstance(raw_tags, list):
+            for t in raw_tags:
+                if isinstance(t, dict):
+                    k = t.get('key') or t.get('tagName') or t.get('Key')
+                    v = t.get('value') or t.get('tagValue') or t.get('Value')
+                    if k: tags[k] = v
+        elif isinstance(raw_tags, dict):
+            tags = raw_tags
         
         mandatory = ['Project', 'Owner', 'Environment']
         missing = [t for t in mandatory if t not in tags and t.lower() not in [k.lower() for k in tags.keys()]]
@@ -247,10 +270,11 @@ class GovernanceService:
     # --- Well-Architected Pillar Checks ---
 
     def check_rds_ha(self, res: Resource):
-        """Check if RDS instance is Multi-AZ."""
+        """Check if RDS/SQL instance is Multi-AZ for AWS/Azure."""
         if res.type != "Database": return "pass", "Not a database.", {}
         meta = res.cloud_metadata or {}
-        if meta.get('multi_az'):
+        multi_az = self._get_meta_val(meta, 'multi_az', 'high_availability')
+        if multi_az:
             return "pass", "Database is configured for High Availability (Multi-AZ).", {}
         return "fail", "Database is Single-AZ; risk of downtime during maintenance/failure.", {"current": "Single-AZ"}
 
@@ -292,11 +316,22 @@ class GovernanceService:
             return True, "Storage encryption mission successful: AES-256 enabled."
         return False, f"Encryption mission failed: {result.get('message')}"
 
-    def check_s3_public_access(self, res: Resource):
-        """Detect publicly accessible storage buckets."""
+    def check_s3_security(self, res: Resource):
+        """Check if S3/Blob storage has server-side encryption enabled."""
         if res.type != "Storage": return "pass", "Not storage.", {}
         meta = res.cloud_metadata or {}
-        if meta.get('public_access') == 'Public' or "public" in (res.external_id or "").lower():
+        encryption = self._get_meta_val(meta, 'encryption', 'server_side_encryption')
+        
+        if encryption and encryption != "None":
+            return "pass", f"Storage is encrypted with {encryption}.", {"encryption": encryption}
+        return "fail", "Storage bucket lacks server-side encryption.", {"encryption": "None"}
+
+    def check_s3_public_access(self, res: Resource):
+        """Detect publicly accessible storage buckets (AWS/Azure/GCP)."""
+        if res.type != "Storage": return "pass", "Not storage.", {}
+        meta = res.cloud_metadata or {}
+        public_access = self._get_meta_val(meta, 'public_access', 'allow_public_access')
+        if public_access == 'Public' or "public" in (res.external_id or "").lower():
             return "fail", "Bucket is publicly accessible; potential data leak boundary detected.", {"access": "Public"}
         return "pass", "Bucket is private.", {}
 
@@ -319,11 +354,11 @@ class GovernanceService:
         """Cost Optimization: Detect databases with no active connections."""
         if res.type != "Database": return "pass", "Not a database.", {}
         
-        # In production, check CloudWatch 'DatabaseConnections' or Azure Monitor 'DatabaseConnections'
         meta = res.cloud_metadata or {}
-        connections = meta.get('connections', 0)
+        connections = self._get_meta_val(meta, 'connections', 'active_connections')
         
-        if connections == 0:
+        if connections == 0 or connections is None:
+            # We treat None as a warning in this tactical scan
             return "fail", "Idle Database detected: 0 active connections in the last 24h.", {"connections": 0, "action": "Decommission recommended"}
         
         return "pass", f"Database is active ({connections} connections).", {"connections": connections}

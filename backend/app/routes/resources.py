@@ -14,7 +14,7 @@ from app.models.user import User
 from app.models.cloud_account import CloudAccount
 from app.models.resource import Resource
 from app.services.cache_service import cache_service
-from app.services.rightsizing_service import rightsizing_service
+from app.services.rightsizing_service import rightsizing_engine
 
 router = APIRouter(prefix="/resources", tags=["resources"], redirect_slashes=False)
 
@@ -33,18 +33,28 @@ def get_resources(current_user: User = Depends(get_current_viewer), db: Session 
     # Use restrict_to_project for additional safety (though joined above)
     db_resources = restrict_to_project(query, current_user, CloudAccount).all()
     
-    # Map to serializable list
-    result = [
-        {
+    # Map to serializable list and 🛸 Inject Fleet Intelligence 🛸
+    result = []
+    for r in db_resources:
+        meta = r.cloud_metadata or {}
+        res_dict = {
             "id": r.id, "name": r.name, "type": r.type, "provider": r.provider, 
             "region": r.region, "status": r.status, "instance_type": r.instance_type,
             "os_type": r.os_type,
-            "public_ip": r.public_ip, "private_ip": r.private_ip, "cloud_metadata": r.cloud_metadata,
+            "public_ip": r.public_ip, "private_ip": r.private_ip, "cloud_metadata": meta,
             "estimated_monthly_cost": r.estimated_monthly_cost
-        } for r in db_resources
-    ]
+        }
+        
+        # 🛸 Tactical Linkage: Identify Parent Cluster for VMs
+        if r.type == 'Compute':
+            tags = meta.get('Tags', []) if isinstance(meta.get('Tags'), list) else []
+            cluster_tag = next((t['Value'] for t in tags if t['Key'] in ['eks:cluster-name', 'aws:eks:cluster-name']), None)
+            if cluster_tag:
+                res_dict["parent_cluster"] = cluster_tag
+
+        result.append(res_dict)
     
-    cache_service.set(cache_key, result, ttl_seconds=300) # 5m tactical cache
+    cache_service.set(cache_key, result, ttl_seconds=60) # Reduced to 1m for fleet accuracy
     return result
 
 class QuickCreateRequest(BaseModel):
@@ -120,7 +130,7 @@ def trigger_manual_sync(current_user: User = Depends(get_current_operator), db: 
 @router.get("/rightsizing/all")
 def get_all_rightsizing_recommendations(current_user: User = Depends(get_current_viewer), db: Session = Depends(get_db)):
     """Fetch all intelligence-driven rightsizing recommendations for the mission project."""
-    recommendations = rightsizing_service.get_all_recommendations(db, project_id=current_user.project_id)
+    recommendations = rightsizing_engine.get_recommendations(db, project_id=current_user.project_id)
     return recommendations
 
 @router.post("/{resource_id}/action")
@@ -175,16 +185,32 @@ def resource_action(
                 return {"status": "success", "message": "Industrial Decommission Mission initiated via Terraform."}
 
         # Fallback to direct cloud action
-        result = adapter.manage_instance(resource.external_id, resource.region, action, account)
+        result = adapter.manage_instance(
+            instance_id=resource.external_id, 
+            region=resource.region, 
+            action=action, 
+            account=account,
+            resource_type=resource.type
+        )
         
         if result.get("status") == "success":
             target_status = 'running' if action == 'start' else 'stopped'
+            # 🛸 Tactical Alignment: Clusters use 'active' instead of 'running'
+            if resource.type == 'Cluster' and action == 'start':
+                target_status = 'active'
+                
             resource.status = 'pending'
             db.commit()
+            
+            # 🧹 Invalidate intelligence cache for all project users 🧹
+            cache_service.delete_pattern(f"res_v1_p{account.project_id}_*")
             
             # 📡 Launch Lifecycle Surveillance 📡
             from app.tasks.resource_tasks import poll_resource_lifecycle_status
             poll_resource_lifecycle_status.delay(resource.id, target_status)
+        else:
+            # Raise exception to ensure frontend knows it failed
+            raise HTTPException(status_code=400, detail=result.get("message", "Tactical Action Failed"))
             
         return result
     except Exception as e:

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Activity, IndianRupee, Server, Cloud, RefreshCw, TrendingUp, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useCurrency } from '../context/CurrencyContext';
@@ -56,11 +56,44 @@ const Dashboard = () => {
   if (loading) return <div className="animate-pulse flex space-x-4">Loading dashboard metrics...</div>;
 
   const statCards = [
-    { name: 'Total Monthly Cost', value: formatValue(summary?.total_cost || 0), icon: CurrencyIcon, color: 'text-emerald-500', bg: 'bg-emerald-100' },
+    { name: 'Total Monthly Cost', value: formatValue(summary?.total_cost || 0), icon: IndianRupee, color: 'text-emerald-500', bg: 'bg-emerald-100' },
     { name: 'Active Resources', value: resources.length, icon: Server, color: 'text-blue-500', bg: 'bg-blue-100' },
     { name: 'Cloud Accounts', value: summary?.linked_accounts || 0, icon: Cloud, color: 'text-purple-500', bg: 'bg-purple-100' },
     { name: 'Estimated Savings', value: formatValue(summary?.potential_savings || 0), icon: TrendingUp, color: 'text-amber-500', bg: 'bg-amber-100' },
   ];
+
+  // 📊 High-Fidelity Custom Tooltip 📊
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      const total = payload.reduce((sum, entry) => sum + (entry.value || 0), 0);
+      return (
+        <div className="bg-white/95 backdrop-blur-md border border-slate-200 p-4 rounded-2xl shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+          <div className="flex justify-between items-center mb-3 border-b border-slate-100 pb-2">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</p>
+            <p className="text-sm font-black text-emerald-600">{formatValue(total, label)}</p>
+          </div>
+          <div className="space-y-2">
+            {payload.map((entry, index) => {
+              const provider = entry.name;
+              const count = resources.filter(r => r.provider?.toLowerCase() === provider.toLowerCase()).length;
+              const color = entry.color || entry.stroke;
+              return (
+                <div key={index} className="flex items-center justify-between gap-6">
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
+                    <span className="text-[10px] font-black text-slate-600 uppercase tracking-tighter">{provider}</span>
+                    <span className="text-[9px] font-bold text-slate-300">({count} resources)</span>
+                  </div>
+                  <span className="text-[11px] font-bold text-slate-800">{formatValue(entry.value, label)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -102,6 +135,7 @@ const Dashboard = () => {
           </div>
         ))}
       </div>
+
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Chart */}
@@ -150,13 +184,33 @@ const Dashboard = () => {
                       <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3}/>
                       <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}/>
                     </linearGradient>
+                    <linearGradient id="colorContabo" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="colorCloudflare" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f97316" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
+                    </linearGradient>
                   </defs>
                   <XAxis dataKey={viewMode === 'daily' ? 'date' : 'month'} stroke="#94a3b8" fontSize={10} fontWeight="bold" tickLine={false} axisLine={false} />
                   <YAxis stroke="#94a3b8" fontSize={10} fontWeight="bold" tickLine={false} axisLine={false} tickFormatter={(val) => formatValue(val)} />
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <Tooltip 
-                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', fontSize: '12px', fontWeight: 'bold' }}
-                    formatter={(val) => [formatValue(val), 'Cost']}
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend 
+                    verticalAlign="top" 
+                    align="right" 
+                    iconType="circle"
+                    content={({ payload }) => (
+                      <div className="flex gap-4 justify-end mb-4">
+                        {payload.map((entry, index) => (
+                          <div key={index} className="flex items-center gap-1.5">
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{entry.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   />
                   {Object.keys((viewMode === 'daily' ? trends : history)[0] || {}).filter(k => k !== 'date' && k !== 'month').map((provider, i) => {
                     const colors = {
@@ -164,19 +218,21 @@ const Dashboard = () => {
                       azure: { stroke: '#3b82f6', fill: 'url(#colorAzure)' },
                       gcp: { stroke: '#6366f1', fill: 'url(#colorGcp)' },
                       digitalocean: { stroke: '#0ea5e9', fill: 'url(#colorDo)' },
+                      contabo: { stroke: '#f59e0b', fill: 'url(#colorContabo)' },
+                      cloudflare: { stroke: '#f97316', fill: 'url(#colorCloudflare)' },
                       github: { stroke: '#64748b', fill: '#f1f5f9' }
                     };
                     const config = colors[provider] || { stroke: '#94a3b8', fill: '#f1f5f9' };
                     return (
                       <Area 
                         key={provider}
-                        stackId="1"
                         type="monotone" 
                         dataKey={provider} 
                         stroke={config.stroke} 
-                        strokeWidth={2}
-                        fillOpacity={1} 
+                        strokeWidth={3}
+                        fillOpacity={0.1} 
                         fill={config.fill} 
+                        activeDot={{ r: 6, strokeWidth: 0 }}
                       />
                     );
                   })}

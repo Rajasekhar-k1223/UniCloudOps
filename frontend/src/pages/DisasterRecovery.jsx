@@ -13,12 +13,12 @@ const DisasterRecovery = () => {
 
   const fetchData = async () => {
     try {
-      const [standbyRes, resourcesRes, accountsRes] = await Promise.all([
-        api.get('/dr/health'),
+      const [drPairsRes, resourcesRes, accountsRes] = await Promise.all([
+        api.get('/dr/status/1'),
         api.get('/resources'),
         api.get('/cloud-accounts')
       ]);
-      setStandbys(standbyRes.data);
+      setStandbys(drPairsRes.data);
       setResources(resourcesRes.data);
       setAccounts(accountsRes.data);
     } catch (err) {
@@ -33,15 +33,12 @@ const DisasterRecovery = () => {
   }, []);
 
   const handleFailover = async () => {
-    if (!selectedResource || !targetAccount) return alert('Select resource and target standby account.');
+    if (!selectedResource) return alert('Select a DR mission to initiate.');
     if (!window.confirm('WARNING: You are about to initiate a high-priority Disaster Recovery mission. Workloads will be moved to the standby boundary. Proceed?')) return;
     
     setFailoverInProgress(true);
     try {
-      const res = await api.post('/dr/failover', {
-        resource_id: parseInt(selectedResource),
-        target_account_id: parseInt(targetAccount)
-      });
+      const res = await api.post(`/dr/failover/${selectedResource}`);
       alert(res.data.message);
       fetchData();
     } catch (err) {
@@ -78,29 +75,15 @@ const DisasterRecovery = () => {
 
               <div className="space-y-6">
                  <div>
-                    <label className="text-xs font-bold text-gray-400 uppercase tracking-widest block mb-2">Primary Resource</label>
+                    <label className="text-xs font-bold text-gray-400 uppercase tracking-widest block mb-2">Active DR Mission</label>
                     <select 
                       value={selectedResource}
                       onChange={(e) => setSelectedResource(e.target.value)}
                       className="w-full px-4 py-3 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-rose-500 outline-none font-medium text-gray-700 bg-white"
                     >
-                       <option value="">Select Asset...</option>
-                       {resources.map(r => (
-                         <option key={r.id} value={r.id}>{r.name} ({r.provider.toUpperCase()})</option>
-                       ))}
-                    </select>
-                 </div>
-
-                 <div>
-                    <label className="text-xs font-bold text-gray-400 uppercase tracking-widest block mb-2">Target Standby Boundary</label>
-                    <select 
-                      value={targetAccount}
-                      onChange={(e) => setTargetAccount(e.target.value)}
-                      className="w-full px-4 py-3 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-rose-500 outline-none font-medium text-gray-700 bg-white"
-                    >
-                       <option value="">Select Shadow Target...</option>
-                       {accounts.map(acc => (
-                         <option key={acc.id} value={acc.id}>{acc.name} ({acc.provider.toUpperCase()})</option>
+                       <option value="">Select Mission...</option>
+                       {standbys.map(s => (
+                         <option key={s.id} value={s.id}>{s.name}</option>
                        ))}
                     </select>
                  </div>
@@ -116,7 +99,7 @@ const DisasterRecovery = () => {
 
                  <button 
                    onClick={handleFailover}
-                   disabled={failoverInProgress || !selectedResource || !targetAccount}
+                   disabled={failoverInProgress || !selectedResource}
                    className={`w-full py-4 rounded-2xl font-bold text-sm transition-all shadow-xl flex items-center justify-center gap-3 ${
                      failoverInProgress ? 'bg-slate-200 text-slate-500' : 'bg-rose-600 text-white hover:bg-rose-700 shadow-rose-200'
                    }`}
@@ -140,30 +123,37 @@ const DisasterRecovery = () => {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                 {standbys.map((s, idx) => (
-                   <div key={idx} className="p-5 bg-slate-50 border border-slate-100 rounded-3xl group hover:border-indigo-300 transition-all">
-                      <div className="flex justify-between items-start mb-4">
-                         <div className="p-3 bg-white rounded-2xl border border-slate-200 shadow-sm group-hover:text-indigo-600 transition-colors">
-                            <Layers size={20} />
-                         </div>
-                         <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase border ${
-                           s.status === 'Ready' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-amber-50 text-amber-600 border-amber-100 animate-pulse'
-                         }`}>
-                           {s.status}
-                         </span>
-                      </div>
-                      <h4 className="font-bold text-gray-800 text-sm mb-1">{s.name}</h4>
-                      <p className="text-[11px] text-gray-400 font-medium mb-4">{s.target} • US-East-1 Shadow</p>
-                      
-                      <div className="flex items-center justify-between pt-4 border-t border-slate-200/50">
-                         <div className="flex items-center gap-1.5">
-                            <RefreshCw size={12} className="text-slate-300" />
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Last Sync: {s.last_sync}</span>
-                         </div>
-                         <button className="text-[10px] font-bold text-indigo-600 hover:underline px-2 py-1">Integrity Check</button>
-                      </div>
-                   </div>
-                 ))}
+                 {standbys.map((s) => (
+                    <div key={s.id} className="p-5 bg-slate-50 border border-slate-100 rounded-3xl group hover:border-indigo-300 transition-all">
+                       <div className="flex justify-between items-start mb-4">
+                          <div className="p-3 bg-white rounded-2xl border border-slate-200 shadow-sm group-hover:text-indigo-600 transition-colors">
+                             <Layers size={20} />
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase border ${
+                            s.primary?.status === 'healthy' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-amber-50 text-amber-600 border-amber-100 animate-pulse'
+                          }`}>
+                            {s.sync_status}
+                          </span>
+                       </div>
+                       <h4 className="font-bold text-gray-800 text-sm mb-1">{s.name}</h4>
+                       <p className="text-[11px] text-gray-400 font-medium mb-4">
+                         {s.primary?.provider.toUpperCase()} ({s.primary?.region}) → {s.standby?.provider.toUpperCase()} ({s.standby?.region})
+                       </p>
+                       
+                       <div className="flex items-center justify-between pt-4 border-t border-slate-200/50">
+                          <div className="flex items-center gap-1.5">
+                             <RefreshCw size={12} className="text-slate-300" />
+                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Last Sync: {s.last_sync}</span>
+                          </div>
+                          <button 
+                            onClick={() => setSelectedResource(s.id)}
+                            className="text-[10px] font-bold text-indigo-600 hover:underline px-2 py-1"
+                          >
+                            Select for Failover
+                          </button>
+                       </div>
+                    </div>
+                  ))}
               </div>
 
               <div className="mt-8 p-6 bg-slate-900 rounded-3xl relative overflow-hidden">

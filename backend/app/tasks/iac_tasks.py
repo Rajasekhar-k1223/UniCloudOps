@@ -69,6 +69,24 @@ echo "✅ Mission Success. Resource lifecycle confirmed."
         tar_stream.seek(0)
         container.put_archive("/app", tar_stream)
         
+        # 💾 PRE-FLIGHT: Inject Existing Terraform State if Mission is a follow-up 💾
+        if deployment_id:
+            try:
+                mongo_db = get_mongo_db()
+                state_doc = mongo_db.terraform_states.find_one({"deployment_id": deployment_id})
+                if state_doc and "state" in state_doc:
+                    logger.info(f"💾 Restoring tactical state for deployment {deployment_id}...")
+                    state_bytes = state_doc["state"].encode('utf-8')
+                    state_tar_stream = io.BytesIO()
+                    with tarfile.open(fileobj=state_tar_stream, mode='w') as state_tar:
+                        state_info = tarfile.TarInfo(name="terraform.tfstate")
+                        state_info.size = len(state_bytes)
+                        state_tar.addfile(state_info, io.BytesIO(state_bytes))
+                    state_tar_stream.seek(0)
+                    container.put_archive("/app", state_tar_stream)
+            except Exception as se:
+                logger.warning(f"Failed to restore state from vault: {se}")
+
         # Launch the mission
         container.start()
         
@@ -79,36 +97,51 @@ echo "✅ Mission Success. Resource lifecycle confirmed."
             decoded_line = line.decode("utf-8")
             full_logs += decoded_line
             
-            # Throttle DB updates to once every 2 seconds
+            # Throttle DB updates
             if db and deployment_id and (time.time() - last_update > 2.0):
                 deployment = db.query(Deployment).filter(Deployment.id == deployment_id).first()
                 if deployment:
-                    # Truncate for streaming too if it gets huge
                     stream_logs = full_logs
                     if len(stream_logs) > 60000:
                         stream_logs = stream_logs[:30000] + "\n...[TRUNCATED]...\n" + stream_logs[-30000:]
                     deployment.logs = stream_logs
                     db.commit()
                     
-                    # 📡 Broadcast real-time telemetry to the user's HUD 📡
                     try:
                         from app.utils.connection_manager import manager
                         import asyncio
-                        
                         loop = asyncio.get_event_loop()
-                        msg = {
-                            "type": "log_stream",
-                            "deployment_id": deployment_id,
-                            "logs": decoded_line # Send just the new line for incremental update
-                        }
+                        msg = {"type": "log_stream", "deployment_id": deployment_id, "logs": decoded_line}
                         if loop.is_running():
                             loop.create_task(manager.broadcast_to_user(deployment.user_id, msg))
-                    except Exception as ws_e:
-                        logger.error(f"Failed to stream logs via WebSocket: {ws_e}")
-
+                    except: pass
                 last_update = time.time()
         
         container.wait()
+        
+        # 💾 POST-FLIGHT: Secure Tactical State to MongoDB Vault 💾
+        if deployment_id:
+            try:
+                # Extract terraform.tfstate from the container before removal
+                bits, stat = container.get_archive("/app/terraform.tfstate")
+                tar_data = io.BytesIO()
+                for chunk in bits: tar_data.write(chunk)
+                tar_data.seek(0)
+                
+                with tarfile.open(fileobj=tar_data) as tar:
+                    state_file = tar.extractfile("terraform.tfstate")
+                    if state_file:
+                        state_content = state_file.read().decode('utf-8')
+                        mongo_db = get_mongo_db()
+                        mongo_db.terraform_states.update_one(
+                            {"deployment_id": deployment_id},
+                            {"$set": {"state": state_content, "updated_at": time.time()}},
+                            upsert=True
+                        )
+                        logger.info(f"🛡️ Mission State Secured for deployment {deployment_id}.")
+            except Exception as se:
+                logger.error(f"Failed to secure mission state: {se}")
+
         container.remove()
         
         if db:

@@ -82,56 +82,77 @@ const NotificationCenter = () => {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-3 w-96 bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-          <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-            <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
-              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-              Tactical Alerts
-            </h3>
+        <div className="absolute right-0 mt-3 w-96 bg-white/90 backdrop-blur-xl border border-slate-200/60 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-50 overflow-hidden animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className="px-6 py-5 border-b border-slate-100/50 flex justify-between items-center bg-white/50">
+            <div className="flex flex-col">
+              <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-[0.2em] flex items-center gap-2">
+                <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_10px_#10b981]" />
+                Tactical Signal Feed
+              </h3>
+              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Sovereign Uplink Active</p>
+            </div>
             {unreadCount > 0 && (
               <button 
                 onClick={markAllRead}
-                className="text-[10px] font-bold text-blue-600 hover:text-blue-700 uppercase tracking-tight flex items-center gap-1"
+                className="px-3 py-1.5 bg-indigo-50 text-[10px] font-black text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-xl transition-all uppercase tracking-tighter shadow-sm"
               >
-                <Check size={12} /> Acknowledge All
+                Clear All
               </button>
             )}
           </div>
 
-          <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
+          <div className="max-h-[450px] overflow-y-auto custom-scrollbar p-2 space-y-1">
             {notifications.length === 0 ? (
-              <div className="py-12 flex flex-col items-center justify-center text-slate-400 space-y-3">
-                <Bell size={32} className="opacity-20" />
-                <p className="text-[10px] font-black uppercase tracking-widest">No active alerts detected</p>
+              <div className="py-20 flex flex-col items-center justify-center text-slate-300 space-y-4">
+                <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center border border-slate-100">
+                   <Bell size={24} className="opacity-40" />
+                </div>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em]">Silence across mission sector</p>
               </div>
             ) : (
               notifications.map((n) => (
                 <div 
                   key={n.id}
                   className={clsx(
-                    "p-4 border-b border-slate-50 transition-colors group flex gap-4",
-                    !n.is_read ? "bg-blue-50/30 hover:bg-blue-50/50" : "hover:bg-slate-50"
+                    "p-4 rounded-2xl transition-all group flex gap-4 relative overflow-hidden",
+                    !n.is_read ? "bg-white shadow-md border border-slate-100" : "hover:bg-slate-50/50 border border-transparent"
                   )}
                 >
-                  <div className="mt-1 flex-shrink-0">
+                  {/* Severity Accent Bar */}
+                  {!n.is_read && (
+                    <div className={clsx(
+                      "absolute left-0 top-0 bottom-0 w-1",
+                      n.severity === 'critical' ? "bg-rose-500" : n.severity === 'warning' ? "bg-amber-500" : "bg-blue-500"
+                    )} />
+                  )}
+
+                  <div className={clsx(
+                    "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110",
+                    n.severity === 'critical' ? "bg-rose-50 text-rose-500" : n.severity === 'warning' ? "bg-amber-50 text-amber-500" : "bg-blue-50 text-blue-500"
+                  )}>
                     {getIcon(n.severity)}
                   </div>
-                  <div className="flex-grow space-y-1">
+                  
+                  <div className="flex-grow space-y-1.5">
                     <p className={clsx(
                       "text-xs leading-relaxed",
-                      !n.is_read ? "text-slate-900 font-bold" : "text-slate-600 font-medium"
+                      !n.is_read ? "text-slate-900 font-black tracking-tight" : "text-slate-500 font-medium"
                     )}>
                       {n.message}
                     </p>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
-                      {formatDistanceToNow(new Date(n.created_at))} ago
-                    </p>
+                    <div className="flex items-center gap-2">
+                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
+                         {formatDistanceToNow(new Date(n.created_at))} ago
+                       </p>
+                       {!n.is_read && <span className="w-1 h-1 rounded-full bg-indigo-400" />}
+                    </div>
                   </div>
+
                   {!n.is_read && (
                     <button 
                       onClick={() => markAsRead(n.id)}
-                      className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white rounded-lg border border-slate-200 text-slate-400 hover:text-emerald-500 transition-all"
-                      title="Acknowledge"
+                      className="opacity-0 group-hover:opacity-100 p-2 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-600 hover:text-white transition-all shadow-sm"
+                      title="Acknowledge Signal"
                     >
                       <Check size={14} />
                     </button>
@@ -141,9 +162,9 @@ const NotificationCenter = () => {
             )}
           </div>
 
-          <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 text-center">
-            <button className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-colors">
-              View Audit Log Archive
+          <div className="px-6 py-4 bg-slate-50/50 border-t border-slate-100 flex items-center justify-center">
+            <button className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] hover:text-indigo-600 transition-all flex items-center gap-2">
+              <Activity size={12} /> View Mission Archives
             </button>
           </div>
         </div>

@@ -42,11 +42,16 @@ class CloudflareAdapter(BaseCloudAdapter):
         import random
         trends = []
         for i in range(days, -1, -1):
-            date_str = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
-            # Fixed daily rate for subscription + variable WAF/Workers usage
-            cost = (20.0 / 30.0) + random.uniform(0.1, 0.5)
+            dt = datetime.now() - timedelta(days=i)
+            # Integrity Check: No cost before account linkage
+            if account and dt.timestamp() < account.created_at.timestamp():
+                cost = 0.0
+            else:
+                # Fixed daily rate for Pro Plan ($20/mo)
+                cost = 20.0 / 30.0
+            
             trends.append({
-                "date": date_str,
+                "date": dt.strftime("%Y-%m-%d"),
                 "cloudflare": round(cost, 2)
             })
         return trends
@@ -70,15 +75,59 @@ class CloudflareAdapter(BaseCloudAdapter):
     def get_terraform_provider_vars(self, creds: Dict) -> Dict[str, str]:
         return {"CLOUDFLARE_API_TOKEN": creds.get('api_token'), "CLOUDFLARE_EMAIL": creds.get('email')}
 
+    def verify_connectivity(self, account: CloudAccount) -> Dict:
+        creds = decrypt_credentials(account.encrypted_credentials)
+        token = creds.get('api_token')
+        if not token: return {"authenticated": True, "access": True, "note": "Simulation Mode"}
+        
+        import requests
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        try:
+            resp = requests.get("https://api.cloudflare.com/client/v4/user/tokens/verify", headers=headers, timeout=10)
+            if resp.status_code == 200:
+                return {"authenticated": True, "access": True}
+            return {"authenticated": False, "error": resp.text}
+        except Exception as e:
+            return {"authenticated": False, "error": str(e)}
+
     def sync_resources(self, account: CloudAccount) -> List[Dict]:
-        return [{
-            "external_id": "cf-zone-993",
-            "name": "unicloudops.io",
-            "type": "Network",
-            "status": "active",
-            "region": "global",
-            "estimated_monthly_cost": 20.0
-        }]
+        from app.core.crypto import decrypt_credentials
+        creds = decrypt_credentials(account.encrypted_credentials)
+        token = creds.get('api_token')
+        
+        if not token:
+            return [{
+                "external_id": "cf-zone-993",
+                "name": "unicloudops.io",
+                "type": "Network",
+                "status": "active",
+                "region": "global",
+                "estimated_monthly_cost": 20.0
+            }]
+            
+        import requests
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        discovered = []
+        try:
+            resp = requests.get("https://api.cloudflare.com/client/v4/zones", headers=headers, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                for zone in data.get('result', []):
+                    discovered.append({
+                        "external_id": zone['id'],
+                        "name": zone['name'],
+                        "type": "Network",
+                        "status": zone['status'],
+                        "region": "global",
+                        "estimated_monthly_cost": 20.0 if zone.get('plan', {}).get('name') != 'Free Plan' else 0.0,
+                        "cloud_metadata": zone
+                    })
+            else:
+                logger.error(f"Cloudflare API Error: {resp.status_code} - {resp.text}")
+            return discovered
+        except Exception as e:
+            logger.error(f"Cloudflare Sync Failed: {e}")
+            return []
 
     def get_storage_options(self) -> List[Dict]:
         return []
@@ -88,9 +137,6 @@ class CloudflareAdapter(BaseCloudAdapter):
 
     def get_billing_breakdown(self, account: Optional[CloudAccount] = None) -> Dict[str, float]:
         return {"Subscription": 20.0, "Security": 2.50, "Compute (Workers)": 1.25}
-
-    def verify_connectivity(self, account: CloudAccount) -> Dict:
-        return {"authenticated": True, "access": True}
 
     def get_clusters(self, account: CloudAccount) -> List[Dict]:
         return []

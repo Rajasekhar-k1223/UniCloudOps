@@ -240,7 +240,7 @@ const Resources = () => {
     setActionLoading(prev => ({ ...prev, [id]: action }));
     try {
       await api.post(`/resources/${id}/action?action=${action}`);
-      setResources(prev => prev.map(r => r.id === id ? { ...r, status: isTerminate ? 'terminating' : 'pending' } : r));
+      setResources(prev => prev.map(r => r.id === id ? { ...r, status: 'pending' } : r));
       setTimeout(fetchResources, 5000);
     } catch (err) {
       console.error("Action mission failed:", err);
@@ -322,6 +322,7 @@ const Resources = () => {
 
   const renderMetadataTab = (res) => {
     const meta = res.cloud_metadata || {};
+    const results = res.compliance_results || [];
     
     switch (activeTab) {
       case 'summary':
@@ -959,7 +960,6 @@ const Resources = () => {
       }
       case 'compliance':
         // Display results from the GovernanceService
-        const results = res.compliance_results || [];
         return (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -1019,12 +1019,14 @@ const Resources = () => {
           </div>
         );
       case 'architecture':
+        const safeResults = Array.isArray(results) ? results : [];
         const pillarStats = {
-          availability: results.filter(r => r.policy?.category === 'availability'),
-          security: results.filter(r => r.policy?.category === 'security'),
-          reliability: results.filter(r => r.policy?.category === 'reliability'),
-          cost: results.filter(r => r.policy?.category === 'cost'),
-          governance: results.filter(r => r.policy?.category === 'governance')
+          availability: safeResults.filter(r => r?.policy?.category === 'availability'),
+          security: safeResults.filter(r => r?.policy?.category === 'security'),
+          reliability: safeResults.filter(r => r?.policy?.category === 'reliability'),
+          performance: safeResults.filter(r => r?.policy?.category === 'performance'),
+          cost: safeResults.filter(r => r?.policy?.category === 'cost'),
+          governance: safeResults.filter(r => r?.policy?.category === 'governance')
         };
 
         return (
@@ -1058,22 +1060,33 @@ const Resources = () => {
             </div>
 
             <div className="space-y-4">
-               {Object.entries(pillarStats).map(([pillar, items]) => items.length > 0 && (
-                 <div key={pillar} className="animate-in fade-in slide-in-from-left-4">
-                   <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 px-1">{pillar} Findings</h4>
-                   <div className="space-y-2">
-                     {items.map((item, idx) => (
-                       <div key={idx} className={`p-4 rounded-xl border flex items-center justify-between ${item.status === 'fail' ? 'bg-rose-50/50 border-rose-100' : 'bg-emerald-50/30 border-emerald-100'}`}>
-                         <div className="flex items-center gap-3">
-                           {item.status === 'fail' ? <ShieldAlert className="w-4 h-4 text-rose-500" /> : <MonitorCheck className="w-4 h-4 text-emerald-500" />}
-                           <p className="text-xs font-bold text-gray-800">{item.policy?.name}</p>
+               {Object.entries(pillarStats).some(([_, items]) => items.length > 0) ? (
+                 Object.entries(pillarStats).map(([pillar, items]) => items.length > 0 && (
+                   <div key={pillar} className="animate-in fade-in slide-in-from-left-4">
+                     <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 px-1">{pillar} Findings</h4>
+                     <div className="space-y-2">
+                       {items.map((item, idx) => (
+                         <div key={idx} className={`p-4 rounded-xl border flex items-center justify-between ${item.status === 'fail' ? 'bg-rose-50/50 border-rose-100' : 'bg-emerald-50/30 border-emerald-100'}`}>
+                           <div className="flex items-center gap-3">
+                             {item.status === 'fail' ? <ShieldAlert className="w-4 h-4 text-rose-500" /> : <MonitorCheck className="w-4 h-4 text-emerald-500" />}
+                             <p className="text-xs font-bold text-gray-800">{item?.policy?.name || 'Architectural Guardrail'}</p>
+                           </div>
+                           <p className="text-[10px] font-medium text-gray-500">{item.message}</p>
                          </div>
-                         <p className="text-[10px] font-medium text-gray-500">{item.message}</p>
-                       </div>
-                     ))}
+                       ))}
+                     </div>
                    </div>
+                 ))
+               ) : (
+                 <div className="py-16 text-center bg-slate-50 rounded-3xl border border-dashed border-slate-200">
+                    <Layout className="w-12 h-12 text-slate-200 mx-auto mb-4" />
+                    <h4 className="text-sm font-bold text-slate-800">Architectural Analysis Pending</h4>
+                    <p className="text-xs text-slate-400 max-w-xs mx-auto mt-1">
+                      Our AI-Architect is currently mapping the structural integrity of this mission. 
+                      Run a 'Full Sync' to generate the framework alignment.
+                    </p>
                  </div>
-               ))}
+               )}
             </div>
           </div>
         );
@@ -1274,7 +1287,7 @@ const Resources = () => {
                 >
                   Close
                 </button>
-                {selectedResource.type === 'Compute' && (selectedResource.status?.toLowerCase() === 'stopped' || selectedResource.status?.toLowerCase() === 'power_off' || selectedResource.status?.toLowerCase() === 'deallocated') && (
+                {(selectedResource.type === 'Compute' || selectedResource.type === 'Cluster') && (selectedResource.status?.toLowerCase() === 'stopped' || selectedResource.status?.toLowerCase() === 'power_off' || selectedResource.status?.toLowerCase() === 'deallocated') && (
                   <button 
                     onClick={() => handleAction(selectedResource.id, 'start')}
                     disabled={!canManage || actionLoading[selectedResource.id]}
@@ -1285,7 +1298,7 @@ const Resources = () => {
                     {actionLoading[selectedResource.id] === 'start' ? 'Starting...' : 'Start Instance'}
                   </button>
                 )}
-                {selectedResource.type === 'Compute' && (selectedResource.status?.toLowerCase() === 'running' || selectedResource.status?.toLowerCase() === 'active') && (
+                {(selectedResource.type === 'Compute' || selectedResource.type === 'Cluster') && (selectedResource.status?.toLowerCase() === 'running' || selectedResource.status?.toLowerCase() === 'active') && (
                   <div className="flex gap-2">
                     <button 
                       onClick={() => handleAction(selectedResource.id, 'reboot')}
@@ -1409,7 +1422,7 @@ const Resources = () => {
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-gray-100">
+        <div className="overflow-x-auto custom-scrollbar rounded-xl border border-gray-100">
           <table className="min-w-full divide-y divide-gray-100">
             <thead className="bg-slate-50/80">
               <tr>
@@ -1419,6 +1432,7 @@ const Resources = () => {
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Type / Spec</th>
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Identity / IP</th>
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Fleet Affinity</th>
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Monthly Est.</th>
                 <th className="px-6 py-4 text-right text-[10px] font-bold text-slate-500 uppercase tracking-wider">Actions</th>
               </tr>
@@ -1492,14 +1506,28 @@ const Resources = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4">
+                    {res.parent_cluster ? (
+                      <div className="flex items-center gap-2 px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg border border-indigo-100 w-fit">
+                         <Layout className="w-3 h-3" />
+                         <span className="text-[9px] font-black uppercase tracking-tighter">{res.parent_cluster}</span>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-slate-300 italic">Standalone</span>
+                    )}
+                  </td>
+                  <td className="px-6 py-4">
                     <span className="text-xs font-bold text-emerald-600">
                       {formatValue(res.estimated_monthly_cost || 0)}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-right space-x-2">
-                    {res.type === 'Compute' && canManage && (
+                    {(res.type === 'Compute' || res.type === 'Cluster') && canManage && (
                       <div className="inline-flex gap-1" onClick={e => e.stopPropagation()}>
-                         {(res.status?.toLowerCase() === 'running') ? (
+                         {['pending', 'starting', 'stopping', 'creating', 'terminating'].includes(res.status?.toLowerCase()) ? (
+                           <div className="p-2 text-indigo-400 bg-indigo-50/50 rounded-lg animate-pulse" title="Mission in Progress">
+                             <RefreshCw className="w-4 h-4 animate-spin" />
+                           </div>
+                         ) : (res.status?.toLowerCase() === 'running' || res.status?.toLowerCase() === 'active') ? (
                            <button 
                              onClick={() => handleAction(res.id, 'stop')}
                              disabled={actionLoading[res.id]}
@@ -1520,8 +1548,8 @@ const Resources = () => {
                          )}
                          <button 
                             onClick={() => handleAction(res.id, 'terminate')}
-                            disabled={actionLoading[res.id]}
-                            className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition"
+                            disabled={actionLoading[res.id] || ['pending', 'starting', 'stopping'].includes(res.status?.toLowerCase())}
+                            className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition disabled:opacity-30"
                             title="Decommission Resource"
                           >
                             <Trash2 className="w-4 h-4" />

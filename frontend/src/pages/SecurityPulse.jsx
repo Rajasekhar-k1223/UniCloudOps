@@ -10,11 +10,27 @@ const SecurityPulse = () => {
 
   const fetchData = async () => {
     try {
-      const [threatsRes, statsRes] = await Promise.all([
+      const [threatsRes, statsRes, findingsRes] = await Promise.all([
         api.get('/security-pulse/threats'),
-        api.get('/security-pulse/stats')
+        api.get('/security-pulse/stats'),
+        api.get('/security/findings/1') // Assuming project ID 1 for now
       ]);
-      setThreats(threatsRes.data);
+      
+      // Merge findings into the threat feed for a unified view
+      const combinedThreats = [
+        ...threatsRes.data,
+        ...findingsRes.data.map(f => ({
+          id: f.id,
+          type: f.title,
+          severity: f.severity,
+          source_ip: f.category,
+          target: f.resource_name,
+          status: 'detected',
+          timestamp: 'LIVE SCAN'
+        }))
+      ];
+      
+      setThreats(combinedThreats);
       setStats(statsRes.data);
     } catch (err) {
       console.error("Failed to fetch security data:", err);
@@ -81,57 +97,75 @@ const SecurityPulse = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Threat Feed */}
-        <div className="lg:col-span-2 glass-panel shadow-xl border-slate-200/60 overflow-hidden flex flex-col">
-           <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-              <h3 className="font-bold text-gray-800 flex items-center gap-2">
-                 <ShieldAlert className="text-rose-500 w-5 h-5" />
-                 Tactical Threat Feed
+        {/* 🛸 Neural-Mesh Threat Feed 🛸 */}
+        <div className="lg:col-span-2 space-y-4">
+           <div className="flex justify-between items-center px-2">
+              <h3 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em] flex items-center gap-2">
+                 <div className="w-2 h-2 bg-rose-500 rounded-full animate-pulse shadow-[0_0_10px_#f43f5e]" />
+                 Tactical Threat Matrix
               </h3>
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none">mission_integrity.log</span>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-none bg-slate-100 px-2 py-1 rounded-md">LIVE_SEC_LINK_v2.1</span>
            </div>
            
-           <div className="flex-1 overflow-y-auto max-h-[500px]">
+           <div className="grid grid-cols-1 gap-4 max-h-[600px] overflow-y-auto custom-scrollbar pr-2">
               {loading ? (
-                <div className="py-20 text-center text-gray-400 italic">Accessing security uplink...</div>
+                <div className="py-20 flex flex-col items-center justify-center text-slate-300 space-y-4 glass-panel bg-white/50 border-slate-100">
+                   <RefreshCw className="w-8 h-8 animate-spin opacity-40" />
+                   <p className="text-[10px] font-black uppercase tracking-[0.2em]">Synchronizing Security Uplink...</p>
+                </div>
               ) : threats.length > 0 ? (
-                <table className="min-w-full divide-y divide-gray-50">
-                  <tbody className="bg-white">
-                    {threats.map((threat) => (
-                      <tr key={threat.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-4">
-                           <div className="flex items-center gap-3">
-                              <div className={`w-2 h-2 rounded-full animate-pulse ${threat.severity === 'critical' ? 'bg-rose-600' : 'bg-amber-500'}`} />
-                              <div>
-                                 <p className="text-sm font-bold text-gray-800">{threat.type}</p>
-                                 <p className="text-[10px] text-gray-400 font-mono leading-none">{threat.timestamp}</p>
-                              </div>
-                           </div>
-                        </td>
-                        <td className="px-6 py-4">
-                           <span className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-1 rounded">
-                              {threat.source_ip}
-                           </span>
-                        </td>
-                        <td className="px-6 py-4">
-                           <p className="text-xs font-bold text-slate-600">{threat.target}</p>
-                        </td>
-                        <td className="px-6 py-4">
-                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${getSeverityStyle(threat.severity)}`}>
-                             {threat.severity}
-                           </span>
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                           <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">
-                              {threat.status}
-                           </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                threats.map((threat) => (
+                  <div 
+                    key={threat.id} 
+                    className={clsx(
+                      "glass-panel p-5 bg-white border-slate-100 hover:border-indigo-200 transition-all group relative overflow-hidden flex flex-col md:flex-row items-center gap-6",
+                      threat.severity === 'critical' && "shadow-[0_0_20px_rgba(244,63,94,0.05)] border-rose-100/50"
+                    )}
+                  >
+                    {/* Severity Pulse Ring */}
+                    <div className={clsx(
+                       "w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110 shadow-sm",
+                       threat.severity === 'critical' ? "bg-rose-50 text-rose-500 border border-rose-100" : "bg-amber-50 text-amber-500 border border-amber-100"
+                    )}>
+                       <ShieldAlert size={20} className={threat.severity === 'critical' ? "animate-pulse" : ""} />
+                    </div>
+
+                    <div className="flex-1 space-y-1">
+                       <div className="flex items-center gap-2">
+                          <p className="text-sm font-black text-slate-800 tracking-tight">{threat.type}</p>
+                          <span className={clsx(
+                             "px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-tighter border",
+                             threat.severity === 'critical' ? "bg-rose-500 text-white border-rose-400" : "bg-amber-100 text-amber-700 border-amber-200"
+                          )}>
+                            {threat.severity}
+                          </span>
+                       </div>
+                       <div className="flex items-center gap-3">
+                          <p className="text-[10px] font-bold text-slate-400 font-mono tracking-tighter flex items-center gap-1.5">
+                             <Globe size={10} /> {threat.source_ip}
+                          </p>
+                          <span className="w-1 h-1 rounded-full bg-slate-200" />
+                          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{threat.target}</p>
+                       </div>
+                    </div>
+
+                    <div className="flex flex-col items-end gap-2 shrink-0">
+                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{threat.timestamp}</p>
+                       <div className="flex gap-2">
+                          <button className="px-3 py-1.5 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-indigo-600 transition-all shadow-lg shadow-slate-200">
+                             Mitigate
+                          </button>
+                          <button className="p-1.5 border border-slate-200 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all">
+                             <X size={14} />
+                          </button>
+                       </div>
+                    </div>
+                  </div>
+                ))
               ) : (
-                <div className="py-20 text-center text-gray-400 italic">No tactical threats detected in current trajectory.</div>
+                <div className="py-20 text-center text-slate-300 italic glass-panel bg-white/50 border-slate-100 rounded-3xl">
+                   No tactical threats detected in current trajectory.
+                </div>
               )}
            </div>
         </div>

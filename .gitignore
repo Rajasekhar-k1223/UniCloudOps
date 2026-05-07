@@ -52,3 +52,10 @@ logs.txt
 logs_utf8.txt
 backend/error_dump.txt
 backend/error_dump_utf8.txt
+
+# Tactical Binaries and Schedules
+backend/aws/
+backend/awscliv2.zip
+backend/celerybeat-schedule
+backend/debug_gcp_sync.py
+backend/scratch/

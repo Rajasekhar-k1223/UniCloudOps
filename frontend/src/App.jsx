@@ -12,7 +12,7 @@ import ProvisionCompute from './pages/ProvisionCompute';
 import CreateVM from './pages/CreateVM';
 import Projects from './pages/Projects';
 import Governance from './pages/Governance';
-import Kubernetes from './pages/Kubernetes';
+import K8sFleet from './pages/K8sFleet';
 import AuditLogs from './pages/AuditLogs';
 import Marketplace from './pages/Marketplace';
 import Serverless from './pages/Serverless';
@@ -33,6 +33,7 @@ import EvolutionTrace from './pages/EvolutionTrace';
 import ComplianceVault from './pages/ComplianceVault';
 import Rightsizing from './pages/Rightsizing';
 import ServiceHub from './pages/ServiceHub';
+import BlueprintStudio from './pages/BlueprintStudio';
 
 const ProtectedRoute = ({ children }) => {
     // ... (rest of the file remains same)
@@ -63,7 +64,7 @@ function App() {
           <Route path="create-vm" element={<CreateVM />} />
           <Route path="projects" element={<Projects />} />
           <Route path="governance" element={<Governance />} />
-          <Route path="kubernetes" element={<Kubernetes />} />
+          <Route path="kubernetes" element={<K8sFleet />} />
           <Route path="audit" element={<AuditLogs />} />
           <Route path="marketplace" element={<Marketplace />} />
           <Route path="serverless" element={<Serverless />} />
@@ -84,6 +85,7 @@ function App() {
           <Route path="compliance" element={<ComplianceVault />} />
           <Route path="rightsizing" element={<Rightsizing />} />
           <Route path="services" element={<ServiceHub />} />
+          <Route path="blueprint-studio" element={<BlueprintStudio />} />
         </Route>
       </Routes>
     </Router>

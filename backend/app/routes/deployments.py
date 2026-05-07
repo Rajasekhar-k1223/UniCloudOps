@@ -23,10 +23,21 @@ def get_templates(db: Session = Depends(get_db), current_user: User = Depends(ge
 @router.post("/", response_model=DeploymentResponse)
 def create_deployment(deploy_in: DeploymentCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_operator)):
     """Launch a new infrastructure mission (Operator Authority Required)."""
-    # Ensure template exists
-    template = db.query(Template).filter(Template.id == deploy_in.template_id).first()
+    # 🛡️ Strategic Blueprint Resolution 🛡️
+    # Support both Internal Integer ID and Tactical String Stack ID (aws-eks-v1)
+    template = None
+    if isinstance(deploy_in.template_id, int) or (isinstance(deploy_in.template_id, str) and deploy_in.template_id.isdigit()):
+        template = db.query(Template).filter(Template.id == int(deploy_in.template_id)).first()
+    
     if not template:
-        raise HTTPException(status_code=404, detail="Blueprint not found")
+        template = db.query(Template).filter(Template.stack_id == str(deploy_in.template_id)).first()
+
+    if not template:
+        logger.error(f"MISSION HALTED: Strategic blueprint '{deploy_in.template_id}' not found in sovereign ledger.")
+        raise HTTPException(status_code=404, detail=f"Strategic stack blueprint '{deploy_in.template_id}' not found.")
+        
+    # Correct the template_id to the integer ID for DB persistence if it was a string
+    deploy_in.template_id = template.id
         
     # 🛡️ Mission Guardrail: Cross-Cloud Compatibility Check 🛡️
     from app.models.cloud_account import CloudAccount

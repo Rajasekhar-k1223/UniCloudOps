@@ -56,7 +56,7 @@ class BaseCloudAdapter(ABC):
             date_str = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
             trends.append({
                 "date": date_str,
-                self.provider_id: round(random.uniform(2.0, 15.0), 2)
+                self.provider_id: 0.0
             })
         return trends
 
@@ -74,7 +74,7 @@ class BaseCloudAdapter(ABC):
             month_str = dt.strftime("%Y-%m")
             history.append({
                 "month": month_str,
-                self.provider_id: round(random.uniform(150.0, 500.0), 2)
+                self.provider_id: 0.0
             })
         return history
 
@@ -143,6 +143,10 @@ class BaseCloudAdapter(ABC):
 
     def get_clusters(self, account: CloudAccount) -> List[Dict]:
         """Fetch managed Kubernetes clusters (Default: empty)."""
+        return []
+
+    def get_networks(self, account: CloudAccount) -> List[Dict]:
+        """Fetch managed virtual networks and subnets (Default: empty)."""
         return []
 
     def get_functions(self, account: CloudAccount) -> List[Dict]:

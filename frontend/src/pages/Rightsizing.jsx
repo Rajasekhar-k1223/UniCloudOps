@@ -10,7 +10,8 @@ const Rightsizing = () => {
 
   const fetchData = async () => {
     try {
-      const res = await api.get('/resources/rightsizing/all');
+      // Assuming project ID 1 for now
+      const res = await api.get('/rightsizing/recommendations/1');
       setRecommendations(res.data);
     } catch (err) {
       console.error("Intelligence engine offline:", err);
@@ -29,9 +30,17 @@ const Rightsizing = () => {
     setTimeout(() => setIsRefreshing(false), 800);
   };
 
-  const totalSavings = recommendations.reduce((acc, rec) => acc + (rec.estimated_monthly_savings || 0), 0);
-  const downsizeCount = recommendations.filter(r => r.action === 'DOWNSIZE').length;
-  const upsizeCount = recommendations.filter(r => r.action === 'UPSIZE').length;
+  const handleApply = async (resourceId) => {
+    try {
+      const res = await api.post(`/rightsizing/apply/${resourceId}`);
+      alert(res.data.message);
+    } catch (err) {
+      alert("Failed to apply optimization.");
+    }
+  };
+
+  const totalSavings = recommendations.reduce((acc, rec) => acc + (rec.potential_savings || 0), 0);
+  const highUrgencyCount = recommendations.filter(r => r.urgency === 'high').length;
 
   return (
     <div className="min-h-screen bg-[#020617] text-slate-300 font-sans selection:bg-amber-500/30">
@@ -78,8 +87,8 @@ const Rightsizing = () => {
            </div>
 
            {[
-             { label: 'Downsize Candidates', value: downsizeCount, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-             { label: 'Performance Bottlenecks', value: upsizeCount, color: 'text-rose-500', bg: 'bg-rose-500/10' },
+             { label: 'Optimization Candidates', value: recommendations.length, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+             { label: 'High Urgency', value: highUrgencyCount, color: 'text-rose-500', bg: 'bg-rose-500/10' },
              { label: 'Data Fidelity', value: 'Prime', color: 'text-blue-500', bg: 'bg-blue-500/10' }
            ].map((card, i) => (
              <div key={i} className="bg-white/[0.02] border border-white/5 rounded-3xl p-8 hover:translate-y-[-4px] transition-all">
@@ -110,112 +119,66 @@ const Rightsizing = () => {
            ) : (
              <div className="grid grid-cols-1 gap-6">
                 {recommendations.map((rec, i) => (
-                  <div key={i} className="group glass-panel-dark bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 hover:border-amber-500/20 rounded-[2.5rem] p-8 flex flex-col lg:flex-row items-center gap-12 transition-all">
-                     <div className="shrink-0 space-y-4 text-center lg:text-left">
-                        <div className={clsx(
-                           "w-20 h-20 rounded-3xl flex items-center justify-center border-2",
-                           rec.action === 'DOWNSIZE' ? "bg-amber-500/10 border-amber-500/20 text-amber-500" : "bg-rose-500/10 border-rose-500/20 text-rose-500"
-                        )}>
-                           {rec.action === 'DOWNSIZE' ? <TrendingDown size={40} /> : <Zap size={40} />}
-                        </div>
-                        <div className="flex flex-col gap-1 items-center lg:items-start text-[9px] font-black uppercase tracking-widest">
-                           <span className="text-slate-600">Avg Utilization</span>
-                           <span className={clsx(rec.avg_cpu < 15 ? "text-amber-500" : "text-emerald-500")}>{rec.avg_cpu}% CPU</span>
-                        </div>
-                     </div>
+                   <div key={i} className="group glass-panel-dark bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 hover:border-amber-500/20 rounded-[2.5rem] p-8 flex flex-col lg:flex-row items-center gap-12 transition-all">
+                      <div className="shrink-0 space-y-4 text-center lg:text-left">
+                         <div className={clsx(
+                            "w-20 h-20 rounded-3xl flex items-center justify-center border-2",
+                            rec.urgency === 'high' ? "bg-rose-500/10 border-rose-500/20 text-rose-500" : "bg-amber-500/10 border-amber-500/20 text-amber-500"
+                         )}>
+                            <TrendingDown size={40} />
+                         </div>
+                         <div className="flex flex-col gap-1 items-center lg:items-start text-[9px] font-black uppercase tracking-widest">
+                            <span className="text-slate-600">Avg Utilization</span>
+                            <span className="text-amber-500">{rec.cpu_avg}% CPU</span>
+                         </div>
+                      </div>
 
-                     <div className="flex-1 space-y-6">
-                        <div className="space-y-1">
-                           <div className="flex items-center gap-2 mb-2">
-                             <span className="px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-[9px] font-black text-slate-400 uppercase tracking-widest">{rec.resource_name}</span>
-                             <span className="px-2 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[9px] font-black text-indigo-400 uppercase tracking-widest">Compute Asset</span>
-                           </div>
-                           <h4 className="text-2xl font-black text-white tracking-tight uppercase leading-none">{rec.action} <span className="text-slate-500">ADVISORY</span></h4>
-                        </div>
+                      <div className="flex-1 space-y-6">
+                         <div className="space-y-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-[9px] font-black text-slate-400 uppercase tracking-widest">{rec.resource_name}</span>
+                              <span className="px-2 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[9px] font-black text-indigo-400 uppercase tracking-widest">{rec.provider.toUpperCase()} Asset</span>
+                            </div>
+                            <h4 className="text-2xl font-black text-white tracking-tight uppercase leading-none">Downsize <span className="text-slate-500">ADVISORY</span></h4>
+                         </div>
 
-                        <div className="flex flex-col md:flex-row gap-6 items-center">
-                           <div className="flex-1 w-full bg-white/5 rounded-2xl p-6 border border-white/5 group-hover:border-white/10 transition-all flex items-center justify-between">
-                              <div className="space-y-1">
-                                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Current Matrix</p>
-                                 <p className="text-xl font-black text-white">{rec.current_type}</p>
-                              </div>
-                              <ArrowRight className="text-slate-700" size={24} />
-                              <div className="text-right space-y-1">
-                                 <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Recommended</p>
-                                 <p className="text-xl font-black text-amber-400">{rec.recommended_type}</p>
-                              </div>
-                           </div>
+                         <div className="flex flex-col md:flex-row gap-6 items-center">
+                            <div className="flex-1 w-full bg-white/5 rounded-2xl p-6 border border-white/5 group-hover:border-white/10 transition-all flex items-center justify-between">
+                               <div className="space-y-1">
+                                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Current Matrix</p>
+                                  <p className="text-xl font-black text-white">{rec.current_config}</p>
+                               </div>
+                               <ArrowRight className="text-slate-700" size={24} />
+                               <div className="text-right space-y-1">
+                                  <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Recommended</p>
+                                  <p className="text-xl font-black text-amber-400">{rec.recommended_config}</p>
+                               </div>
+                            </div>
 
-                           <div className="shrink-0 flex flex-col items-center md:items-end gap-1">
-                              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Estimated Savings</p>
-                              <p className="text-3xl font-black text-emerald-400 tabular-nums">${rec.estimated_monthly_savings}<span className="text-xs text-slate-500 ml-1">/mo</span></p>
-                           </div>
-                        </div>
+                            <div className="shrink-0 flex flex-col items-center md:items-end gap-1">
+                               <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Estimated Savings</p>
+                               <p className="text-3xl font-black text-emerald-400 tabular-nums">${rec.potential_savings}<span className="text-xs text-slate-500 ml-1">/mo</span></p>
+                            </div>
+                         </div>
 
-                        <div className="flex items-start gap-3 p-4 bg-amber-500/5 rounded-2xl border border-amber-500/10">
-                           <AlertTriangle className="text-amber-500 shrink-0" size={16} />
-                           <p className="text-[11px] font-medium text-slate-400 italic">"{rec.reason}"</p>
-                        </div>
-                     </div>
+                         <div className="flex items-start gap-3 p-4 bg-amber-500/5 rounded-2xl border border-amber-500/10">
+                            <AlertTriangle className="text-amber-500 shrink-0" size={16} />
+                            <p className="text-[11px] font-medium text-slate-400 italic">"{rec.reason}"</p>
+                         </div>
+                      </div>
 
-                     <div className="shrink-0 w-full lg:w-fit flex flex-col gap-3">
-                        <button className="w-full lg:w-48 py-4 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all">
-                           View Analytics
-                        </button>
-                        <button 
-                           onClick={() => alert("Rightsizing mission initiated. Deployment in progress.")}
-                           className="w-full lg:w-48 py-4 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-xl shadow-amber-600/20"
-                        >
-                           Apply Optimization
-                        </button>
-                     </div>
-                  </div>
+                      <div className="shrink-0 w-full lg:w-fit flex flex-col gap-3">
+                         <button 
+                            onClick={() => handleApply(rec.resource_id)}
+                            className="w-full lg:w-48 py-4 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-xl shadow-amber-600/20"
+                         >
+                            Apply Optimization
+                         </button>
+                      </div>
+                   </div>
                 ))}
              </div>
            )}
-        </div>
-
-        {/* Intelligence Insight Sidebar (Horizontal Integration) */}
-        <div className="mt-20 grid grid-cols-1 lg:grid-cols-2 gap-12 pt-20 border-t border-white/5">
-           <div className="bg-gradient-to-br from-indigo-600 to-violet-700 rounded-[3rem] p-12 text-white relative overflow-hidden group">
-              <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 blur-[80px] rounded-full group-hover:scale-150 transition-transform duration-[2000ms]" />
-              <BarChart3 className="w-16 h-16 text-white/20 mb-8" />
-              <h3 className="text-3xl font-black uppercase mb-4 leading-tight relative z-10">Predictive <br/>Efficiency Engine</h3>
-              <p className="text-slate-100/70 font-medium leading-relaxed max-w-md relative z-10">
-                 Our neural analysis maps your past 48 hours of tactical operations to specific cloud provider hardware signatures, ensuring zero performance trade-offs.
-              </p>
-              <div className="mt-8 pt-8 border-t border-white/10 relative z-10 flex items-center gap-6">
-                 <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-indigo-200">Analysis Accuracy</p>
-                    <p className="text-2xl font-black">99.2%</p>
-                 </div>
-                 <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-indigo-200">Data Points</p>
-                    <p className="text-2xl font-black">1.2M+</p>
-                 </div>
-              </div>
-           </div>
-
-           <div className="space-y-6">
-              <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                 <DollarSign size={14} className="text-amber-500" /> Fiscal Mission Compliance
-              </h3>
-              <div className="space-y-4">
-                 {[
-                   { label: 'Under-utilized Resources Identified', count: downsizeCount, color: 'text-amber-500' },
-                   { label: 'Project Budget Health', status: 'Optimal', color: 'text-emerald-500' },
-                   { label: 'Optimization Frequency', status: 'Every 4 Hours', color: 'text-blue-500' }
-                 ].map((stat, i) => (
-                   <div key={i} className="flex items-center justify-between p-6 bg-white/[0.02] border border-white/5 rounded-3xl group hover:border-white/10 transition-all">
-                      <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">{stat.label}</span>
-                      <span className={clsx("text-xs font-black uppercase tracking-widest", stat.color)}>{stat.count ?? stat.status}</span>
-                   </div>
-                 ))}
-              </div>
-              <p className="text-[10px] text-slate-600 italic px-4">
-                 Intelligence advisory is based on current hourly rates and does not include reserved instance discounts or specific regional spot pricing availability.
-              </p>
-           </div>
         </div>
 
       </div>

@@ -32,9 +32,18 @@ const Marketplace = () => {
 
   const handleDeploy = async () => {
     if (!targetAccount) return alert('Select target cloud account');
+    
+    // 🧬 Collect Tactical Variables from Wizard 🧬
+    const variables = {
+      cluster_name: document.getElementById('mission_name')?.value,
+      instance_type: document.getElementById('instance_type')?.value,
+      node_count: document.getElementById('node_count')?.value,
+      region: accounts.find(a => a.id == targetAccount)?.provider === 'aws' ? 'us-east-1' : 'East US'
+    };
+
     setDeploying(true);
     try {
-      const res = await api.post(`/marketplace/deploy/${selectedStack.id}?target_account_id=${targetAccount}`);
+      const res = await api.post(`/marketplace/deploy/${selectedStack.id}?target_account_id=${targetAccount}`, variables);
       alert(res.data.message);
       setSelectedStack(null);
     } catch (err) {
@@ -91,7 +100,7 @@ const Marketplace = () => {
                 <p className="text-sm text-gray-500 leading-relaxed mb-6">{stack.description}</p>
 
                 <div className="flex flex-wrap gap-2 mb-6">
-                   {stack.services.map(s => (
+                   {(Array.isArray(stack.services) ? stack.services : []).map(s => (
                      <span key={s} className="px-2 py-1 bg-slate-50 text-slate-500 rounded text-[10px] font-mono border border-slate-100">
                        {s}
                      </span>
@@ -152,6 +161,41 @@ const Marketplace = () => {
                    <div>
                       <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-widest">Est. Monthly Impact</p>
                       <p className="text-xl font-bold text-gray-900">{formatValue(selectedStack.est_cost)}</p>
+                   </div>
+                </div>
+
+                {/* 🧬 Tactical Wizard: Editable Config 🧬 */}
+                <div className="space-y-4">
+                   <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Mission Parameters</h4>
+                   <div className="grid grid-cols-1 gap-3">
+                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                         <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Cluster / Stack Name</label>
+                         <input 
+                           type="text" 
+                           defaultValue={selectedStack.stack_id + "-prod"}
+                           id="mission_name"
+                           className="w-full bg-transparent border-none outline-none text-sm font-bold text-slate-800"
+                         />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                         <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Instance Type</label>
+                            <select id="instance_type" className="w-full bg-transparent border-none outline-none text-xs font-bold text-slate-800">
+                               <option value="t3.medium">t3.medium (Standard)</option>
+                               <option value="t3.large">t3.large (Performance)</option>
+                               <option value="m5.large">m5.large (Balanced)</option>
+                            </select>
+                         </div>
+                         <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Node Count</label>
+                            <input 
+                               type="number" 
+                               defaultValue="2"
+                               id="node_count"
+                               className="w-full bg-transparent border-none outline-none text-xs font-bold text-slate-800"
+                            />
+                         </div>
+                      </div>
                    </div>
                 </div>
 
