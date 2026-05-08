@@ -93,11 +93,11 @@ const Billing = () => {
            </div>
         </div>
         <div className="glass-panel p-5 bg-white/50 border-white/40">
-           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Target Monthly OpEx</p>
-           <p className="text-2xl font-bold text-gray-900">{formatValue(trends.reduce((acc, curr) => acc + Object.keys(curr).reduce((sum, k) => k !== 'date' ? sum + curr[k] : sum, 0), 0) / (trends.length || 1) * 30)}</p>
-           <div className="mt-2 flex items-center gap-1 text-[10px] text-emerald-600 font-bold">
-             <Clock size={12} />
-             <span>BASED ON 30-DAY AVG</span>
+           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Lifecycle Total (Since Apr 23)</p>
+           <p className="text-2xl font-bold text-gray-900">{formatValue(trends.reduce((acc, curr) => acc + Object.keys(curr).reduce((sum, k) => k !== 'date' ? sum + curr[k] : sum, 0), 0))}</p>
+           <div className="mt-2 flex items-center gap-1 text-[10px] text-emerald-600 font-bold uppercase tracking-tighter">
+             <Clock className="w-3 h-3" />
+             <span>Historical Spend Captured</span>
            </div>
         </div>
         

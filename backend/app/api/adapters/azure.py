@@ -170,13 +170,32 @@ class AzureAdapter(BaseCloudAdapter):
                         logger.debug(f"Cost Query Failed ({q_type}, {timeframe}): {e}")
                         return None
 
-                # Strategy 1: Actual Cost MonthToDate
-                query = run_cost_query("ActualCost", "MonthToDate")
-                
-                # Strategy 2: Fallback to Amortized Cost
+                # Strategy 1: Custom Lifecycle Deep-Scan (From Account Activation: April 23rd)
+                logger.info(f"Azure Billing: Executing Lifecycle Scan from April 23rd for {sub_id}...")
+                try:
+                    from azure.mgmt.costmanagement.models import QueryTimePeriod
+                    custom_period = QueryTimePeriod(from_property="2026-04-23T00:00:00Z", to="2026-05-31T23:59:59Z")
+                    query = cost_client.query.usage(
+                        scope=scope,
+                        parameters={
+                            "type": "ActualCost",
+                            "timeframe": "Custom",
+                            "time_period": custom_period,
+                            "dataset": {
+                                "granularity": "None",
+                                "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+                                "grouping": [{"type": "Dimension", "name": "ServiceName"}]
+                            }
+                        }
+                    )
+                except Exception as ce:
+                    logger.debug(f"Lifecycle Scan failed: {ce}")
+                    query = None
+
+                # Strategy 2: Fallback to standard MonthToDate
                 if not query or not query.rows:
-                    logger.info(f"Azure Billing: ActualCost empty for {sub_id}, trying AmortizedCost...")
-                    query = run_cost_query("AmortizedCost", "MonthToDate")
+                    logger.info(f"Azure Billing: Lifecycle Scan empty, trying standard MonthToDate...")
+                    query = run_cost_query("ActualCost", "MonthToDate")
 
                 # Strategy 3: Fallback to Resource Group Aggregation
                 if not query or not query.rows:
@@ -600,12 +619,12 @@ class AzureAdapter(BaseCloudAdapter):
 
             scope = '/subscriptions/' + sub_id
             
-            # Azure Query for the last N days
+            # Azure Query for the last N days (using explicit 30-day window)
             query = cost_client.query.usage(
                 scope=scope,
                 parameters={
                     "type": "ActualCost",
-                    "timeframe": "MonthToDate", # Simplified for now to stay within SDK limits
+                    "timeframe": "TheLastMonth", # Captures full 30-day trailing window
                     "dataset": {
                         "granularity": "Daily",
                         "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
