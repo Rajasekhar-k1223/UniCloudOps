@@ -208,7 +208,7 @@ const Billing = () => {
                 <Tooltip 
                   cursor={{fill: '#f1f5f9'}}
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(4px)' }}
-                  formatter={(val) => [formatValue(val), 'Tactical Spend']}
+                  formatter={(val, name) => [formatValue(val), `Tactical ${name.toUpperCase()} Spend`]}
                 />
                 <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '10px', textTransform: 'uppercase', fontWeight: 'bold' }} />
                 {providers.map((provider, i) => (
@@ -249,7 +249,7 @@ const Billing = () => {
                   ))}
                 </Pie>
                 <Tooltip 
-                  formatter={(val) => formatValue(val)}
+                  formatter={(val, name) => [formatValue(val), `Total ${name.toUpperCase()} Spend`]}
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                  />
                 <Legend layout="vertical" verticalAlign="bottom" align="center" wrapperStyle={{ fontSize: '10px', textTransform: 'uppercase', fontWeight: 'bold' }} />
