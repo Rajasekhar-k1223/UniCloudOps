@@ -161,7 +161,7 @@ class AzureAdapter(BaseCloudAdapter):
                                 "dataset": {
                                     "granularity": "None",
                                     "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
-                                    "grouping": [{"type": "Dimension", "name": "Currency"}]
+                                    "grouping": [{"type": "Dimension", "name": "ServiceName"}]
                                 }
                             }
                         )
@@ -212,7 +212,7 @@ class AzureAdapter(BaseCloudAdapter):
                                 "dataset": {
                                     "granularity": "None",
                                     "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
-                                    "grouping": [{"type": "Dimension", "name": "Currency"}]
+                                    "grouping": [{"type": "Dimension", "name": "ServiceName"}]
                                 }
                             }
                         )
@@ -609,7 +609,7 @@ class AzureAdapter(BaseCloudAdapter):
                     "dataset": {
                         "granularity": "Daily",
                         "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
-                        "grouping": [{"type": "Dimension", "name": "Currency"}]
+                        "grouping": [{"type": "Dimension", "name": "ServiceName"}]
                     }
                 }
             )
