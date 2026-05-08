@@ -85,6 +85,14 @@ const Billing = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <div className="glass-panel p-5 bg-white/50 border-white/40">
+           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Estimated Today (24h Latency)</p>
+           <p className="text-2xl font-bold text-gray-900">{formatValue(trends.length > 0 ? Object.keys(trends[trends.length-1]).reduce((sum, k) => k !== 'date' ? sum + trends[trends.length-1][k] : sum, 0) : 0)}</p>
+           <div className="mt-2 flex items-center gap-1 text-[10px] text-blue-600 font-bold uppercase tracking-tighter">
+              <Clock className="w-3 h-3" />
+              Live Cloud Pulse
+           </div>
+        </div>
+        <div className="glass-panel p-5 bg-white/50 border-white/40">
            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Target Monthly OpEx</p>
            <p className="text-2xl font-bold text-gray-900">{formatValue(trends.reduce((acc, curr) => acc + Object.keys(curr).reduce((sum, k) => k !== 'date' ? sum + curr[k] : sum, 0), 0) / (trends.length || 1) * 30)}</p>
            <div className="mt-2 flex items-center gap-1 text-[10px] text-emerald-600 font-bold">
