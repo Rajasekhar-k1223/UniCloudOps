@@ -142,30 +142,46 @@ class AzureAdapter(BaseCloudAdapter):
             
             from azure.mgmt.costmanagement.models import QueryDefinition, QueryTimePeriod, QueryDataset, QueryAggregation
             
-            # Simple month-to-date query
-            query = cost_client.query.usage(
-                scope=scope,
-                parameters={
-                    "type": "ActualCost",
-                    "timeframe": "MonthToDate",
-                    "dataset": {
-                        "granularity": "None",
-                        "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
-                        "grouping": [{"type": "Dimension", "name": "Currency"}]
-                    }
-                }
-            )
+            def run_cost_query(q_type, timeframe):
+                try:
+                    return cost_client.query.usage(
+                        scope=scope,
+                        parameters={
+                            "type": q_type,
+                            "timeframe": timeframe,
+                            "dataset": {
+                                "granularity": "None",
+                                "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+                                "grouping": [{"type": "Dimension", "name": "Currency"}]
+                            }
+                        }
+                    )
+                except Exception as e:
+                    logger.debug(f"Cost Query Failed ({q_type}, {timeframe}): {e}")
+                    return None
+
+            # Strategy 1: Actual Cost MonthToDate
+            query = run_cost_query("ActualCost", "MonthToDate")
             
-            logger.info(f"Azure Billing API Trace [{sub_id}]: Rows={query.rows}")
+            # Strategy 2: Fallback to Amortized Cost (some Enterprise agreements)
+            if not query or not query.rows:
+                logger.info(f"Azure Billing: ActualCost empty for {sub_id}, trying AmortizedCost...")
+                query = run_cost_query("AmortizedCost", "MonthToDate")
+
+            # Strategy 3: Fallback to Last Month (to verify API connectivity)
+            if not query or not query.rows:
+                logger.info(f"Azure Billing: MonthToDate empty for {sub_id}, trying TheLastMonth...")
+                query = run_cost_query("ActualCost", "TheLastMonth")
+
+            logger.info(f"Azure Billing API Final Trace [{sub_id}]: Rows={query.rows if query else 'Failed'}")
             
             total_cost = 0.0
-            if query.rows:
+            if query and query.rows:
                 for row in query.rows:
                     if not row or row[0] is None: continue
                     cost = float(row[0])
                     currency = row[1] if len(row) > 1 else "USD"
                     
-                    # 💱 Tactical Currency Normalization (INR to USD)
                     if currency == "INR":
                         cost = cost / 83.5
                     
@@ -175,7 +191,7 @@ class AzureAdapter(BaseCloudAdapter):
                 cache_service.set(cache_key, final_cost, ttl_seconds=3600)
                 return final_cost
             else:
-                logger.info(f"Azure Billing: No rows returned for {sub_id}. Check 'Cost Management Reader' permissions.")
+                logger.warning(f"Azure Billing: All cost queries returned zero for {sub_id}. This is highly likely a Permission or Subscription Type mismatch.")
             return 0.0
         except Exception as e:
             if "429" in str(e):
