@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, ComposedChart, Line, ReferenceLine } from 'recharts';
 import { useCurrency } from '../context/CurrencyContext';
 import { useAuth } from '../context/AuthContext';
 import { DollarSign, ShieldAlert, Target, Clock } from 'lucide-react';
@@ -13,6 +13,31 @@ const Billing = () => {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [projectSummary, setProjectSummary] = useState(null);
+
+  const processedTrends = React.useMemo(() => {
+    let cumulativeSum = 0;
+    const data = [...trends].map(t => {
+      const dailySum = Object.keys(t).reduce((sum, key) => key !== 'date' ? sum + t[key] : sum, 0);
+      cumulativeSum += dailySum;
+      return { ...t, cumulative: cumulativeSum };
+    });
+
+    if (data.length > 0) {
+      const lastPoint = data[data.length - 1];
+      const avgDaily = cumulativeSum / data.length;
+      
+      for (let i = 1; i <= 7; i++) {
+        const fDate = new Date(lastPoint.date);
+        fDate.setDate(fDate.getDate() + i);
+        data.push({
+          date: fDate.toISOString().split('T')[0],
+          forecast: cumulativeSum + (avgDaily * i),
+          isForecast: true
+        });
+      }
+    }
+    return data;
+  }, [trends]);
 
   useEffect(() => {
     const fetchBillingData = async () => {
@@ -197,7 +222,7 @@ const Billing = () => {
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
               <Clock className="w-5 h-5 text-blue-500" />
-              Live Tactical Spend Trends
+              Burn-up & Predictive Forecast (May 2026)
             </h2>
           </div>
           {loading ? (
@@ -206,20 +231,30 @@ const Billing = () => {
             </div>
           ) : trends.length > 0 ? (
             <ResponsiveContainer width="100%" height="90%">
-              <BarChart data={trends} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+              <ComposedChart data={processedTrends} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                 <XAxis dataKey="date" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
                 <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => formatValue(val)} />
                 <Tooltip 
                   cursor={{fill: '#f1f5f9'}}
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(4px)' }}
-                  formatter={(val, name) => [formatValue(val), `Tactical ${name.toUpperCase()} Spend`]}
+                  formatter={(val, name) => [formatValue(val), name.toUpperCase()]}
                 />
                 <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '10px', textTransform: 'uppercase', fontWeight: 'bold' }} />
+                
+                {/* Cumulative Area */}
+                <Area type="monotone" dataKey="cumulative" name="Cumulative Spend" fill="#f0f9ff" stroke="#3b82f6" strokeWidth={0} />
+                
+                {/* Daily Bars */}
                 {providers.map((provider, i) => (
-                  <Bar key={provider} dataKey={provider} stackId="a" fill={colors[i % colors.length]} radius={i === providers.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]} />
+                  <Bar key={provider} dataKey={provider} name={`${provider} (Daily)`} stackId="a" fill={colors[i % colors.length]} radius={i === providers.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]} barSize={20} />
                 ))}
-              </BarChart>
+
+                {/* Forecast Line */}
+                <Line type="monotone" dataKey="forecast" name="Predicted Forecast" stroke="#f59e0b" strokeWidth={3} strokeDasharray="5 5" dot={false} />
+                
+                <ReferenceLine x={trends.length > 0 ? trends[trends.length-1].date : ""} stroke="#ef4444" label={{ position: 'top', value: 'TODAY', fill: '#ef4444', fontSize: 10, fontWeight: 'bold' }} />
+              </ComposedChart>
             </ResponsiveContainer>
           ) : (
             <div className="h-full flex items-center justify-center text-gray-400">
