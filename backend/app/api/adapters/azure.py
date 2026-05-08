@@ -197,6 +197,33 @@ class AzureAdapter(BaseCloudAdapter):
                     except:
                         pass
 
+                # Strategy 4: Tactical Resource Group Walk (Deep Dive)
+                if not query or not query.rows:
+                    logger.info(f"Azure Billing: Direct query failed, performing tactical walk across Resource Groups...")
+                    try:
+                        total_walk_cost = 0.0
+                        _, _, res_client, _, _ = self._get_clients(account)
+                        rgs = list(res_client.resource_groups.list())
+                        for rg in rgs:
+                            rg_scope = f"/subscriptions/{sub_id}/resourceGroups/{rg.name}"
+                            try:
+                                rg_query = cost_client.query.usage(scope=rg_scope, parameters={
+                                    "type": "ActualCost", "timeframe": "MonthToDate",
+                                    "dataset": {"granularity": "None", "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}}}
+                                })
+                                if rg_query.rows:
+                                    rg_cost = float(rg_query.rows[0][0]) if rg_query.rows[0][0] else 0.0
+                                    total_walk_cost += rg_cost
+                                    logger.info(f"Azure Billing Walk: Found ₹{rg_cost} in {rg.name}")
+                            except:
+                                continue
+                        if total_walk_cost > 0:
+                            final_cost = round(total_walk_cost / 83.5, 2)
+                            cache_service.set(cache_key, final_cost, ttl_seconds=3600)
+                            return final_cost
+                    except Exception as we:
+                        logger.debug(f"Tactical Walk failed: {we}")
+
                 logger.info(f"Azure Billing API Final Trace [{sub_id}]: Rows={query.rows if (query and query.rows) else 'Empty'}")
                 
                 total_cost = 0.0
