@@ -619,12 +619,12 @@ class AzureAdapter(BaseCloudAdapter):
 
             scope = '/subscriptions/' + sub_id
             
-            # Azure Query for the last N days (using explicit 30-day window)
+            # Azure Query for the last N days (using MonthToDate for stability)
             query = cost_client.query.usage(
                 scope=scope,
                 parameters={
                     "type": "ActualCost",
-                    "timeframe": "TheLastMonth", # Captures full 30-day trailing window
+                    "timeframe": "MonthToDate",
                     "dataset": {
                         "granularity": "Daily",
                         "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
