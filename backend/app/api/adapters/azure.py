@@ -142,86 +142,36 @@ class AzureAdapter(BaseCloudAdapter):
             if cache_service.get(cooldown_key):
                 return cache_service.get(cache_key) or 0.0
 
-            if not cache_service.set(lock_key, "locked", ttl_seconds=30): # Acquire lock
-                logger.debug(f"Azure Billing: Lock active for {sub_id}, serving cache...")
-                return cache_service.get(cache_key) or 0.0
-
-            try:
-                from azure.mgmt.costmanagement.models import QueryDefinition, QueryTimePeriod, QueryDataset, QueryAggregation
-                
-                def run_cost_query(q_type, timeframe):
-                    try:
-                        import time
-                        time.sleep(1) # Tactical pause to avoid Azure 429 bursts
-                        return cost_client.query.usage(
-                            scope=scope,
-                            parameters={
-                                "type": q_type,
-                                "timeframe": timeframe,
-                                "dataset": {
-                                    "granularity": "None",
-                                    "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
-                                    "grouping": [{"type": "Dimension", "name": "ServiceName"}]
-                                }
-                            }
-                        )
-                    except Exception as e:
-                        if "429" in str(e): raise e
-                        logger.debug(f"Cost Query Failed ({q_type}, {timeframe}): {e}")
-                        return None
-
-                # Strategy 1: Custom Lifecycle Deep-Scan (From Account Activation: April 23rd)
-                logger.info(f"Azure Billing: Executing Lifecycle Scan from April 23rd for {sub_id}...")
+            with cache_service.lock(lock_key, timeout=30):
                 try:
-                    from azure.mgmt.costmanagement.models import QueryTimePeriod
-                    custom_period = QueryTimePeriod(from_property="2026-04-23T00:00:00Z", to="2026-05-31T23:59:59Z")
-                    query = cost_client.query.usage(
-                        scope=scope,
-                        parameters={
-                            "type": "ActualCost",
-                            "timeframe": "Custom",
-                            "time_period": custom_period,
-                            "dataset": {
-                                "granularity": "None",
-                                "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
-                                "grouping": [{"type": "Dimension", "name": "ServiceName"}]
-                            }
-                        }
-                    )
-                except Exception as ce:
-                    logger.debug(f"Lifecycle Scan failed: {ce}")
-                    query = None
-
-                # Strategy 2: Fallback to standard MonthToDate
-                if not query or not query.rows:
-                    logger.info(f"Azure Billing: Lifecycle Scan empty, trying standard MonthToDate...")
-                    query = run_cost_query("ActualCost", "MonthToDate")
-
-                # Strategy 3: Fallback to Resource Group Aggregation
-                if not query or not query.rows:
-                    logger.info(f"Azure Billing: Sub-level query empty, attempting ResourceGroup aggregation...")
-                    try:
-                        query = cost_client.query.usage(
-                            scope=scope,
-                            parameters={
-                                "type": "ActualCost",
-                                "timeframe": "MonthToDate",
-                                "dataset": {
-                                    "granularity": "None",
-                                    "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
-                                    "grouping": [{"type": "Dimension", "name": "ResourceGroup"}]
+                    from azure.mgmt.costmanagement.models import QueryDefinition, QueryTimePeriod, QueryDataset, QueryAggregation
+                    
+                    def run_cost_query(q_type, timeframe):
+                        try:
+                            import time
+                            time.sleep(1) # Tactical pause to avoid Azure 429 bursts
+                            return cost_client.query.usage(
+                                scope=scope,
+                                parameters={
+                                    "type": q_type,
+                                    "timeframe": timeframe,
+                                    "dataset": {
+                                        "granularity": "None",
+                                        "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+                                        "grouping": [{"type": "Dimension", "name": "ServiceName"}]
+                                    }
                                 }
-                            }
-                        )
-                    except:
-                        pass
+                            )
+                        except Exception as e:
+                            if "429" in str(e): raise e
+                            logger.debug(f"Cost Query Failed ({q_type}, {timeframe}): {e}")
+                            return None
 
-                # Strategy 5: Custom Temporal Deep-Scan (From April 23rd)
-                if not query or not query.rows:
-                    logger.info(f"Azure Billing: Standard periods empty, attempting Custom Deep-Scan from April 23rd...")
+                    # Strategy 1: Custom Lifecycle Deep-Scan (From Account Activation: April 23rd)
+                    logger.info(f"Azure Billing: Executing Lifecycle Scan from April 23rd for {sub_id}...")
                     try:
                         from azure.mgmt.costmanagement.models import QueryTimePeriod
-                        custom_period = QueryTimePeriod(from_property="2026-04-23T00:00:00Z", to="2026-05-08T23:59:59Z")
+                        custom_period = QueryTimePeriod(from_property="2026-04-23T00:00:00Z", to="2026-05-31T23:59:59Z")
                         query = cost_client.query.usage(
                             scope=scope,
                             parameters={
@@ -235,58 +185,105 @@ class AzureAdapter(BaseCloudAdapter):
                                 }
                             }
                         )
-                        logger.info(f"Azure Billing Custom Scan Result: {query.rows if query else 'None'}")
                     except Exception as ce:
-                        logger.debug(f"Custom Deep-Scan failed: {ce}")
+                        logger.debug(f"Lifecycle Scan failed: {ce}")
+                        query = None
 
-                # Strategy 6: Tactical Resource Group Walk (Deep Dive)
-                if not query or not query.rows:
-                    logger.info(f"Azure Billing: Direct query failed, performing tactical walk across Resource Groups...")
-                    try:
-                        total_walk_cost = 0.0
-                        _, _, res_client, _, _ = self._get_clients(account)
-                        rgs = list(res_client.resource_groups.list())
-                        for rg in rgs:
-                            rg_scope = f"/subscriptions/{sub_id}/resourceGroups/{rg.name}"
-                            try:
-                                rg_query = cost_client.query.usage(scope=rg_scope, parameters={
-                                    "type": "ActualCost", "timeframe": "MonthToDate",
-                                    "dataset": {"granularity": "None", "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}}}
-                                })
-                                if rg_query.rows:
-                                    rg_cost = float(rg_query.rows[0][0]) if rg_query.rows[0][0] else 0.0
-                                    total_walk_cost += rg_cost
-                                    logger.info(f"Azure Billing Walk: Found ₹{rg_cost} in {rg.name}")
-                            except:
-                                continue
-                        if total_walk_cost > 0:
-                            final_cost = round(total_walk_cost / 83.5, 2)
-                            cache_service.set(cache_key, final_cost, ttl_seconds=3600)
-                            return final_cost
-                    except Exception as we:
-                        logger.debug(f"Tactical Walk failed: {we}")
+                    # Strategy 2: Fallback to standard MonthToDate
+                    if not query or not query.rows:
+                        logger.info(f"Azure Billing: Lifecycle Scan empty, trying standard MonthToDate...")
+                        query = run_cost_query("ActualCost", "MonthToDate")
 
-                logger.info(f"Azure Billing API Final Trace [{sub_id}]: Rows={query.rows if (query and query.rows) else 'Empty'}")
-                
-                total_cost = 0.0
-                if query and query.rows:
-                    for row in query.rows:
-                        if not row or row[0] is None: continue
-                        cost = float(row[0])
-                        
-                        # Tactical Currency Normalization (Force INR to USD for this tenant)
-                        # We know the user's data is in INR (~6.3k)
-                        if cost > 100: # Heuristic: If it's over 100, it's likely INR
-                            cost = cost / 83.5
-                        
-                        total_cost += cost
+                    # Strategy 3: Fallback to Resource Group Aggregation
+                    if not query or not query.rows:
+                        logger.info(f"Azure Billing: Sub-level query empty, attempting ResourceGroup aggregation...")
+                        try:
+                            query = cost_client.query.usage(
+                                scope=scope,
+                                parameters={
+                                    "type": "ActualCost",
+                                    "timeframe": "MonthToDate",
+                                    "dataset": {
+                                        "granularity": "None",
+                                        "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+                                        "grouping": [{"type": "Dimension", "name": "ResourceGroup"}]
+                                    }
+                                }
+                            )
+                        except:
+                            pass
+
+                    # Strategy 5: Custom Temporal Deep-Scan (From April 23rd)
+                    if not query or not query.rows:
+                        logger.info(f"Azure Billing: Standard periods empty, attempting Custom Deep-Scan from April 23rd...")
+                        try:
+                            from azure.mgmt.costmanagement.models import QueryTimePeriod
+                            custom_period = QueryTimePeriod(from_property="2026-04-23T00:00:00Z", to="2026-05-08T23:59:59Z")
+                            query = cost_client.query.usage(
+                                scope=scope,
+                                parameters={
+                                    "type": "ActualCost",
+                                    "timeframe": "Custom",
+                                    "time_period": custom_period,
+                                    "dataset": {
+                                        "granularity": "None",
+                                        "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+                                        "grouping": [{"type": "Dimension", "name": "ServiceName"}]
+                                    }
+                                }
+                            )
+                            logger.info(f"Azure Billing Custom Scan Result: {query.rows if query else 'None'}")
+                        except Exception as ce:
+                            logger.debug(f"Custom Deep-Scan failed: {ce}")
+
+                    # Strategy 6: Tactical Resource Group Walk (Deep Dive)
+                    if not query or not query.rows:
+                        logger.info(f"Azure Billing: Direct query failed, performing tactical walk across Resource Groups...")
+                        try:
+                            total_walk_cost = 0.0
+                            _, _, res_client, _, _ = self._get_clients(account)
+                            rgs = list(res_client.resource_groups.list())
+                            for rg in rgs:
+                                rg_scope = f"/subscriptions/{sub_id}/resourceGroups/{rg.name}"
+                                try:
+                                    rg_query = cost_client.query.usage(scope=rg_scope, parameters={
+                                        "type": "ActualCost", "timeframe": "MonthToDate",
+                                        "dataset": {"granularity": "None", "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}}}
+                                    })
+                                    if rg_query.rows:
+                                        rg_cost = float(rg_query.rows[0][0]) if rg_query.rows[0][0] else 0.0
+                                        total_walk_cost += rg_cost
+                                        logger.info(f"Azure Billing Walk: Found \u20b9{rg_cost} in {rg.name}")
+                                except:
+                                    continue
+                            if total_walk_cost > 0:
+                                final_cost = round(total_walk_cost / 83.5, 2)
+                                cache_service.set(cache_key, final_cost, ttl_seconds=3600)
+                                return final_cost
+                        except Exception as we:
+                            logger.debug(f"Tactical Walk failed: {we}")
+
+                    logger.info(f"Azure Billing API Final Trace [{sub_id}]: Rows={query.rows if (query and query.rows) else 'Empty'}")
                     
-                    final_cost = round(total_cost, 2)
-                    cache_service.set(cache_key, final_cost, ttl_seconds=3600)
-                    return final_cost
-                return 0.0
-            finally:
-                cache_service.delete_pattern(lock_key)
+                    total_cost = 0.0
+                    if query and query.rows:
+                        for row in query.rows:
+                            if not row or row[0] is None: continue
+                            cost = float(row[0])
+                            
+                            # Tactical Currency Normalization (Force INR to USD for this tenant)
+                            # We know the user's data is in INR (~6.3k)
+                            if cost > 100: # Heuristic: If it's over 100, it's likely INR
+                                cost = cost / 83.5
+                            
+                            total_cost += cost
+                        
+                        final_cost = round(total_cost, 2)
+                        cache_service.set(cache_key, final_cost, ttl_seconds=3600)
+                        return final_cost
+                    return 0.0
+                finally:
+                    pass # Lock released by context manager
         except Exception as e:
             if "429" in str(e):
                 logger.warning(f"Azure Rate Limit Triggered for {sub_id}. Entering {COOLDOWN_TTL}s cooldown.")
@@ -619,7 +616,7 @@ class AzureAdapter(BaseCloudAdapter):
             scope = '/subscriptions/' + sub_id
             
             lock_key = f"azure_billing_lock_{sub_id}"
-            with cache_service.redis_lock(lock_key, timeout=30):
+            with cache_service.lock(lock_key, timeout=30):
                 # Azure Query from Account Lifecycle Start (April 23)
                 from azure.mgmt.costmanagement.models import QueryTimePeriod
                 custom_period = QueryTimePeriod(from_property="2026-04-23T00:00:00Z", to="2026-05-31T23:59:59Z")
@@ -698,7 +695,7 @@ class AzureAdapter(BaseCloudAdapter):
             scope = '/subscriptions/' + sub_id
             
             lock_key = f"azure_billing_lock_{sub_id}"
-            with cache_service.redis_lock(lock_key, timeout=30):
+            with cache_service.lock(lock_key, timeout=30):
                 query = cost_client.query.usage(
                     scope=scope,
                     parameters={

@@ -54,4 +54,12 @@ class CacheService:
         except Exception as e:
             logger.error(f"Cache Invalidation Failure for pattern '{pattern}': {e}")
 
+    def lock(self, name: str, timeout: int = 60):
+        """Returns a tactical Redis lock to prevent concurrent API thrashing."""
+        if not self.redis_client:
+            # Fallback to a mock lock if Redis is unavailable
+            from unittest.mock import MagicMock
+            return MagicMock().__enter__().return_value
+        return self.redis_client.lock(name, timeout=timeout)
+
 cache_service = CacheService()
