@@ -23,6 +23,8 @@ azure-mgmt-resource==23.1.0
 azure-mgmt-costmanagement==4.0.0
 azure-mgmt-web==7.2.0
 azure-mgmt-containerservice==30.0.0
+azure-mgmt-billing==1.0.0
+azure-core==1.29.7
 google-cloud-billing==1.17.0
 google-cloud-compute==1.47.0
 google-cloud-container==2.64.0
