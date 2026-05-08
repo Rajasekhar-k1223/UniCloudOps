@@ -236,6 +236,25 @@ class AzureAdapter(BaseCloudAdapter):
                         except Exception as ce:
                             logger.debug(f"Custom Deep-Scan failed: {ce}")
 
+                    # Strategy 6: Usage Type Deep-Scan
+                    if not query or not query.rows:
+                        logger.info(f"Azure Billing: ActualCost empty, attempting 'Usage' type scan...")
+                        try:
+                            query = cost_client.query.usage(
+                                scope=scope,
+                                parameters={
+                                    "type": "Usage",
+                                    "timeframe": "MonthToDate",
+                                    "dataset": {
+                                        "granularity": "None",
+                                        "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+                                        "grouping": [{"type": "Dimension", "name": "ServiceName"}]
+                                    }
+                                }
+                            )
+                        except Exception as ce:
+                            logger.debug(f"Usage Scan failed: {ce}")
+
                     # Strategy 6: Tactical Resource Group Walk (Deep Dive)
                     if not query or not query.rows:
                         logger.info(f"Azure Billing: Direct query failed, performing tactical walk across Resource Groups...")
