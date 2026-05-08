@@ -61,6 +61,16 @@ def add_cloud_account(account_in: CloudAccountCreate, db: Session = Depends(get_
 def get_cloud_accounts(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Get all cloud accounts for current user."""
     accounts = db.query(CloudAccount).filter(CloudAccount.user_id == current_user.id).all()
+    
+    from app.api.adapters import get_adapter
+    for acc in accounts:
+        try:
+            adapter = get_adapter(acc.provider)
+            if adapter:
+                acc.connectivity = adapter.verify_connectivity(acc)
+        except Exception as e:
+            acc.connectivity = {"authenticated": False, "error": str(e)}
+            
     return accounts
 
 @router.delete("/{account_id}")

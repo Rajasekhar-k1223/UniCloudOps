@@ -15,6 +15,7 @@ class CloudAccountResponse(CloudAccountBase):
     status: str
     last_sync: Optional[datetime]
     error_message: Optional[str]
+    connectivity: Optional[dict] = None
     created_at: datetime
     
     class Config:

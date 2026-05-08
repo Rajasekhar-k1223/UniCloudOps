@@ -170,7 +170,27 @@ const CloudAccounts = () => {
 
               <h3 className="text-xl font-black text-slate-900 mb-6 tracking-tight group-hover:text-blue-600 transition-colors uppercase">{acc.name}</h3>
               
-              <div className="space-y-4 pt-6 border-t border-slate-50">
+                <div className="space-y-4 pt-6 border-t border-slate-50">
+                {acc.connectivity && (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center text-[10px] font-bold uppercase tracking-widest gap-2">
+                      <ShieldCheck size={14} className={acc.connectivity.authenticated ? "text-emerald-500" : "text-rose-500"} /> 
+                      {acc.connectivity.authenticated ? "Authenticated" : "Auth Failure"}
+                    </div>
+                    <div className="flex items-center text-[10px] font-bold uppercase tracking-widest gap-2">
+                      <div className={`w-3.5 h-3.5 rounded flex items-center justify-center ${acc.connectivity.billing_access ? "bg-emerald-100 text-emerald-600" : "bg-rose-100 text-rose-600"}`}>
+                        $
+                      </div>
+                      {acc.connectivity.billing_access ? "Fiscal Access: ACTIVE" : "Fiscal Access: BLOCKED"}
+                    </div>
+                    {acc.connectivity.note && (
+                      <div className="text-[8px] font-bold text-slate-400 uppercase tracking-widest italic ml-5">
+                        Note: {acc.connectivity.note}
+                      </div>
+                    )}
+                  </div>
+                )}
+                
                 <div className="flex items-center text-[10px] font-bold text-slate-500 uppercase tracking-widest gap-2">
                   <ShieldCheck size={14} className="text-emerald-500" /> 
                   HSTS Encryption Active
