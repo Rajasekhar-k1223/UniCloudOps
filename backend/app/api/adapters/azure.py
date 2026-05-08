@@ -159,6 +159,7 @@ class AzureAdapter(BaseCloudAdapter):
             total_cost = 0.0
             if query.rows:
                 for row in query.rows:
+                    if not row or row[0] is None: continue
                     cost = float(row[0])
                     currency = row[1] if len(row) > 1 else "USD"
                     
@@ -171,6 +172,8 @@ class AzureAdapter(BaseCloudAdapter):
                 final_cost = round(total_cost, 2)
                 cache_service.set(cache_key, final_cost, ttl_seconds=3600)
                 return final_cost
+            else:
+                logger.info(f"Azure Billing: No rows returned for {sub_id}. Check 'Cost Management Reader' permissions.")
             return 0.0
         except Exception as e:
             if "429" in str(e):
@@ -369,13 +372,17 @@ class AzureAdapter(BaseCloudAdapter):
             )
             
             breakdown = {}
-            for row in query.rows:
-                service = str(row[1])
-                cost = float(row[0])
-                # Currency Normalization
-                if len(row) > 2 and row[2] == "INR":
-                    cost = cost / 83.5
-                breakdown[service] = round(cost, 2)
+            if query.rows:
+                for row in query.rows:
+                    if not row or row[0] is None: continue
+                    service = str(row[1])
+                    cost = float(row[0])
+                    # Currency Normalization
+                    if len(row) > 2 and row[2] == "INR":
+                        cost = cost / 83.5
+                    breakdown[service] = round(cost, 2)
+            else:
+                logger.info(f"Azure Billing Breakdown: No rows returned for {sub_id}.")
             
             cache_service.set(cache_key, breakdown, ttl_seconds=3600)
             return breakdown
@@ -388,9 +395,29 @@ class AzureAdapter(BaseCloudAdapter):
     
     def verify_connectivity(self, account: CloudAccount) -> Dict:
         try:
-            comp, _, _, _, _ = self._get_clients(account)
+            comp, _, _, cost_client, _ = self._get_clients(account)
             if not comp: return {"authenticated": True, "access": True, "note": "Simulation Mode"}
-            return {"authenticated": True, "access": True}
+            
+            # Lightweight billing check to verify Cost Management permissions
+            creds = decrypt_credentials(account.encrypted_credentials)
+            sub_id = creds.get('subscription_id')
+            billing_ok = False
+            try:
+                # Just check if we can call the API (even if 0 rows)
+                cost_client.query.usage(scope=f'/subscriptions/{sub_id}', parameters={
+                    "type": "Usage", "timeframe": "MonthToDate", 
+                    "dataset": {"granularity": "None", "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}}}
+                })
+                billing_ok = True
+            except Exception as be:
+                logger.warning(f"Azure Connectivity: Billing access check failed: {be}")
+
+            return {
+                "authenticated": True, 
+                "access": True, 
+                "billing_access": billing_ok,
+                "note": "Complete" if billing_ok else "No Billing Access"
+            }
         except:
             return {"authenticated": False}
 
@@ -476,24 +503,28 @@ class AzureAdapter(BaseCloudAdapter):
             )
             
             trends_map = {}
-            for row in query.rows:
-                # Azure format is often YYYYMMDD (int) or YYYY-MM-DD string
-                raw_date = str(row[1])
-                if len(raw_date) == 8 and raw_date.isdigit():
-                    formatted_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
-                else:
-                    formatted_date = raw_date[:10]
-                
-                cost = float(row[0])
-                currency = row[2] if len(row) > 2 else "USD"
-                
-                # Currency Normalization
-                if currency == "INR":
-                    cost = cost / 83.5
+            if query.rows:
+                for row in query.rows:
+                    if not row or row[0] is None: continue
+                    # Azure format is often YYYYMMDD (int) or YYYY-MM-DD string
+                    raw_date = str(row[1])
+                    if len(raw_date) == 8 and raw_date.isdigit():
+                        formatted_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
+                    else:
+                        formatted_date = raw_date[:10]
+                    
+                    cost = float(row[0])
+                    currency = row[2] if len(row) > 2 else "USD"
+                    
+                    # Currency Normalization
+                    if currency == "INR":
+                        cost = cost / 83.5
 
-                if formatted_date not in trends_map:
-                    trends_map[formatted_date] = 0.0
-                trends_map[formatted_date] += cost
+                    if formatted_date not in trends_map:
+                        trends_map[formatted_date] = 0.0
+                    trends_map[formatted_date] += cost
+            else:
+                logger.info(f"Azure Daily Trends: No rows returned for {sub_id}.")
             
             final_trends = [{"date": d, "azure": round(c, 2)} for d, c in trends_map.items()]
             cache_service.set(cache_key, final_trends, ttl_seconds=3600)
