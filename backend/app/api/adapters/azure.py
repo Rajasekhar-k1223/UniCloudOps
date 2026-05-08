@@ -618,23 +618,29 @@ class AzureAdapter(BaseCloudAdapter):
 
             scope = '/subscriptions/' + sub_id
             
-            # Azure Query from Account Lifecycle Start (April 23)
-            from azure.mgmt.costmanagement.models import QueryTimePeriod
-            custom_period = QueryTimePeriod(from_property="2026-04-23T00:00:00Z", to="2026-05-31T23:59:59Z")
-            
-            query = cost_client.query.usage(
-                scope=scope,
-                parameters={
-                    "type": "ActualCost",
-                    "timeframe": "Custom",
-                    "time_period": custom_period,
-                    "dataset": {
-                        "granularity": "Daily",
-                        "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
-                        "grouping": [{"type": "Dimension", "name": "ServiceName"}]
+            lock_key = f"azure_billing_lock_{sub_id}"
+            with cache_service.redis_lock(lock_key, timeout=30):
+                # Azure Query from Account Lifecycle Start (April 23)
+                from azure.mgmt.costmanagement.models import QueryTimePeriod
+                custom_period = QueryTimePeriod(from_property="2026-04-23T00:00:00Z", to="2026-05-31T23:59:59Z")
+                
+                query = cost_client.query.usage(
+                    scope=scope,
+                    parameters={
+                        "type": "ActualCost",
+                        "timeframe": "Custom",
+                        "time_period": custom_period,
+                        "dataset": {
+                            "granularity": "Daily",
+                            "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+                            "grouping": [{"type": "Dimension", "name": "ServiceName"}]
+                        }
                     }
-                }
-            )
+                )
+                
+                # Tactical Sleep to respect Rate Limits
+                import time
+                time.sleep(2)
             
             logger.info(f"Azure Daily Trends Trace [{sub_id}]: {len(query.rows)} data points found.")
             
@@ -691,18 +697,24 @@ class AzureAdapter(BaseCloudAdapter):
 
             scope = '/subscriptions/' + sub_id
             
-            query = cost_client.query.usage(
-                scope=scope,
-                parameters={
-                    "type": "Usage",
-                    "timeframe": "YearToDate", # Extended range for history
-                    "dataset": {
-                        "granularity": "Monthly",
-                        "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
-                        "grouping": [{"type": "Dimension", "name": "ServiceName"}]
+            lock_key = f"azure_billing_lock_{sub_id}"
+            with cache_service.redis_lock(lock_key, timeout=30):
+                query = cost_client.query.usage(
+                    scope=scope,
+                    parameters={
+                        "type": "Usage",
+                        "timeframe": "YearToDate", # Extended range for history
+                        "dataset": {
+                            "granularity": "Monthly",
+                            "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+                            "grouping": [{"type": "Dimension", "name": "ServiceName"}]
+                        }
                     }
-                }
-            )
+                )
+                
+                # Tactical Sleep
+                import time
+                time.sleep(2)
             
             history_map = {}
             for row in query.rows:
