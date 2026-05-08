@@ -297,7 +297,7 @@ const Billing = () => {
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
               <Tooltip 
                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                formatter={(val) => [formatValue(val), 'Monthly Total']}
+                formatter={(val, name) => [formatValue(val), `Historical ${name.toUpperCase()} Spend`]}
               />
               <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '10px', textTransform: 'uppercase', fontWeight: 'bold' }} />
               {providers.map((provider, i) => (
