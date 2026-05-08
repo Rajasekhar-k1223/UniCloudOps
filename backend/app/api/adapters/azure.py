@@ -16,10 +16,14 @@ def _get_azure_libs():
         from azure.mgmt.network import NetworkManagementClient
         from azure.mgmt.resource import ResourceManagementClient
         from azure.mgmt.costmanagement import CostManagementClient
-        from azure.mgmt.web import WebSiteManagementClient
+        try:
+            from azure.mgmt.web import WebSiteManagementClient
+        except ImportError:
+            WebSiteManagementClient = None
+            
         return ClientSecretCredential, ComputeManagementClient, ResourceManagementClient, NetworkManagementClient, CostManagementClient, WebSiteManagementClient
-    except ImportError:
-        logger.error("Azure SDK libraries not found. Azure functionality will be simulated.")
+    except ImportError as e:
+        logger.error(f"Core Azure SDK libraries not found: {e}. Azure functionality will be simulated.")
         return None, None, None, None, None, None
 
 def sanitize_metadata(data):
@@ -49,7 +53,7 @@ class AzureAdapter(BaseCloudAdapter):
 
     def _get_clients(self, account: CloudAccount):
         ClientSecretCredential, ComputeManagementClient, ResourceManagementClient, NetworkManagementClient, CostManagementClient, WebSiteManagementClient = _get_azure_libs()
-        if not ClientSecretCredential: return None, None, None, None
+        if not ClientSecretCredential: return None, None, None, None, None
         
         creds = decrypt_credentials(account.encrypted_credentials)
         tenant_id = creds.get('tenant_id')
@@ -130,20 +134,24 @@ class AzureAdapter(BaseCloudAdapter):
                     "timeframe": "MonthToDate",
                     "dataset": {
                         "granularity": "None",
-                        "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}}
+                        "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+                        "grouping": [{"type": "Dimension", "name": "Currency"}]
                     }
                 }
             )
             
+            total_cost = 0.0
             if query.rows:
-                cost = float(query.rows[0][0])
-                # 💱 Currency Normalization: Azure often returns local currency (e.g. INR)
-                # If we detect a large mismatch or have currency info, we normalize to USD
-                # Based on your subscription data, we detect INR usage.
-                currency = query.rows[0][1] if len(query.rows[0]) > 1 else "USD"
-                if currency == "INR" or (cost > 500 and "[INR]" in str(query)):
-                     cost = cost / 83.5
-                return round(cost, 2)
+                for row in query.rows:
+                    cost = float(row[0])
+                    currency = row[1] if len(row) > 1 else "USD"
+                    
+                    # 💱 Tactical Currency Normalization (INR to USD)
+                    if currency == "INR":
+                        cost = cost / 83.5
+                    
+                    total_cost += cost
+                return round(total_cost, 2)
             return 0.0
         except Exception as e:
             logger.error(f"Azure Monthly Spend Sync Failed: {e}")
@@ -301,7 +309,40 @@ class AzureAdapter(BaseCloudAdapter):
 
     def get_storage_options(self) -> List[Dict]: return []
     def get_security_groups(self, region: str, account: Optional[CloudAccount] = None) -> List[Dict]: return []
-    def get_billing_breakdown(self, account: Optional[CloudAccount] = None) -> Dict[str, float]: return {}
+    def get_billing_breakdown(self, account: Optional[CloudAccount] = None) -> Dict[str, float]:
+        if not account: return {}
+        _, _, _, cost_client, _ = self._get_clients(account)
+        if not cost_client: return {}
+        
+        try:
+            creds = decrypt_credentials(account.encrypted_credentials)
+            scope = '/subscriptions/' + creds.get('subscription_id')
+            
+            query = cost_client.query.usage(
+                scope=scope,
+                parameters={
+                    "type": "Usage",
+                    "timeframe": "MonthToDate",
+                    "dataset": {
+                        "granularity": "None",
+                        "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+                        "grouping": [{"type": "Dimension", "name": "ServiceName"}]
+                    }
+                }
+            )
+            
+            breakdown = {}
+            for row in query.rows:
+                service = str(row[1])
+                cost = float(row[0])
+                # Currency Normalization
+                if len(row) > 2 and row[2] == "INR":
+                    cost = cost / 83.5
+                breakdown[service] = round(cost, 2)
+            return breakdown
+        except Exception as e:
+            logger.error(f"Azure Billing Breakdown Sync Failed: {e}")
+            return {}
     
     def verify_connectivity(self, account: CloudAccount) -> Dict:
         try:
@@ -374,12 +415,13 @@ class AzureAdapter(BaseCloudAdapter):
                     "timeframe": "MonthToDate", # Simplified for now to stay within SDK limits
                     "dataset": {
                         "granularity": "Daily",
-                        "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}}
+                        "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+                        "grouping": [{"type": "Dimension", "name": "Currency"}]
                     }
                 }
             )
             
-            trends = []
+            trends_map = {}
             for row in query.rows:
                 # Azure format is often YYYYMMDD (int) or YYYY-MM-DD string
                 raw_date = str(row[1])
@@ -389,15 +431,17 @@ class AzureAdapter(BaseCloudAdapter):
                     formatted_date = raw_date[:10]
                 
                 cost = float(row[0])
+                currency = row[2] if len(row) > 2 else "USD"
+                
                 # Currency Normalization
-                if len(row) > 2 and row[2] == "INR":
+                if currency == "INR":
                     cost = cost / 83.5
 
-                trends.append({
-                    "date": formatted_date,
-                    "azure": round(cost, 2)
-                })
-            return trends
+                if formatted_date not in trends_map:
+                    trends_map[formatted_date] = 0.0
+                trends_map[formatted_date] += cost
+            
+            return [{"date": d, "azure": round(c, 2)} for d, c in trends_map.items()]
         except Exception as e:
             logger.error(f"Azure Daily Billing Sync Failed: {e}")
             return super().get_daily_costs(days, account)
@@ -418,12 +462,13 @@ class AzureAdapter(BaseCloudAdapter):
                     "timeframe": "YearToDate", # Extended range for history
                     "dataset": {
                         "granularity": "Monthly",
-                        "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}}
+                        "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+                        "grouping": [{"type": "Dimension", "name": "Currency"}]
                     }
                 }
             )
             
-            history = []
+            history_map = {}
             for row in query.rows:
                 raw_month = str(row[1])
                 if len(raw_month) == 6 and raw_month.isdigit():
@@ -432,15 +477,17 @@ class AzureAdapter(BaseCloudAdapter):
                     formatted_month = raw_month[:7]
                 
                 cost = float(row[0])
+                currency = row[2] if len(row) > 2 else "USD"
+                
                 # Currency Normalization
-                if len(row) > 2 and row[2] == "INR":
+                if currency == "INR":
                     cost = cost / 83.5
 
-                history.append({
-                    "month": formatted_month,
-                    "azure": round(cost, 2)
-                })
-            return history
+                if formatted_month not in history_map:
+                    history_map[formatted_month] = 0.0
+                history_map[formatted_month] += cost
+                
+            return [{"month": m, "azure": round(c, 2)} for m, c in history_map.items()]
         except Exception as e:
             logger.error(f"Azure Monthly Billing Sync Failed: {e}")
             return super().get_monthly_costs(months, account)
