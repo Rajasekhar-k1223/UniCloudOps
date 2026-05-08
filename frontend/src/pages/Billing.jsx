@@ -72,7 +72,12 @@ const Billing = () => {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center mb-2">
-        <h1 className="text-xl font-bold text-gray-800">Financial Intelligence</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-bold text-gray-800">Financial Intelligence</h1>
+          <div className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-[8px] font-bold rounded uppercase tracking-widest border border-emerald-200">
+            Fidelity: REAL DATA
+          </div>
+        </div>
         <button 
           onClick={refreshData}
           disabled={loading}
@@ -93,11 +98,11 @@ const Billing = () => {
            </div>
         </div>
         <div className="glass-panel p-5 bg-white/50 border-white/40">
-           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Lifecycle Total (Since Apr 23)</p>
+           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Total Multi-Cloud Spend</p>
            <p className="text-2xl font-bold text-gray-900">{formatValue(trends.reduce((acc, curr) => acc + Object.keys(curr).reduce((sum, k) => k !== 'date' ? sum + curr[k] : sum, 0), 0))}</p>
            <div className="mt-2 flex items-center gap-1 text-[10px] text-emerald-600 font-bold uppercase tracking-tighter">
              <Clock className="w-3 h-3" />
-             <span>Historical Spend Captured</span>
+             <span>Full Mission Lifecycle</span>
            </div>
         </div>
         
@@ -192,7 +197,7 @@ const Billing = () => {
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
               <Clock className="w-5 h-5 text-blue-500" />
-              Consolidated Spend Trends
+              Live Tactical Spend Trends
             </h2>
           </div>
           {loading ? (
