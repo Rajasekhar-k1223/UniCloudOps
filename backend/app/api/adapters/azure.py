@@ -8,6 +8,8 @@ from app.core.crypto import decrypt_credentials
 from datetime import datetime
 from app.services.cache_service import cache_service
 
+COOLDOWN_TTL = 300 # 5 minutes mission cooldown for rate-limited APIs
+
 logger = logging.getLogger(__name__)
 
 def _get_azure_libs():
@@ -126,6 +128,12 @@ class AzureAdapter(BaseCloudAdapter):
             
             # 🕵️ Tactical Cache Check
             cache_key = f"azure_spend_{sub_id}"
+            cooldown_key = f"azure_billing_cooldown_{sub_id}"
+            
+            # 🕵️ Tactical Cooldown Check: Stop API spam if already rate-limited
+            if cache_service.get(cooldown_key):
+                return cache_service.get(cache_key) or 0.0
+
             cached_data = cache_service.get(cache_key)
             if cached_data is not None:
                 return cached_data
@@ -165,7 +173,12 @@ class AzureAdapter(BaseCloudAdapter):
                 return final_cost
             return 0.0
         except Exception as e:
-            logger.error(f"Azure Monthly Spend Sync Failed: {e}")
+            if "429" in str(e):
+                logger.warning(f"Azure Rate Limit Triggered for {sub_id}. Entering {COOLDOWN_TTL}s cooldown.")
+                cache_service.set(f"azure_billing_cooldown_{sub_id}", True, ttl_seconds=COOLDOWN_TTL)
+            else:
+                logger.error(f"Azure Monthly Spend Sync Failed: {e}")
+            
             # Fallback to cache if possible on error (Rate Limit avoidance)
             return cache_service.get(f"azure_spend_{creds.get('subscription_id')}") or 0.0
 
@@ -331,6 +344,11 @@ class AzureAdapter(BaseCloudAdapter):
             sub_id = creds.get('subscription_id')
             
             cache_key = f"azure_breakdown_{sub_id}"
+            cooldown_key = f"azure_billing_cooldown_{sub_id}"
+
+            if cache_service.get(cooldown_key):
+                return cache_service.get(cache_key) or {}
+
             cached_data = cache_service.get(cache_key)
             if cached_data is not None:
                 return cached_data
@@ -362,7 +380,10 @@ class AzureAdapter(BaseCloudAdapter):
             cache_service.set(cache_key, breakdown, ttl_seconds=3600)
             return breakdown
         except Exception as e:
-            logger.error(f"Azure Billing Breakdown Sync Failed: {e}")
+            if "429" in str(e):
+                cache_service.set(f"azure_billing_cooldown_{sub_id}", True, ttl_seconds=COOLDOWN_TTL)
+            else:
+                logger.error(f"Azure Billing Breakdown Sync Failed: {e}")
             return cache_service.get(f"azure_breakdown_{creds.get('subscription_id')}") or {}
     
     def verify_connectivity(self, account: CloudAccount) -> Dict:
@@ -429,6 +450,11 @@ class AzureAdapter(BaseCloudAdapter):
             sub_id = creds.get('subscription_id')
             
             cache_key = f"azure_trends_{sub_id}_{days}"
+            cooldown_key = f"azure_billing_cooldown_{sub_id}"
+
+            if cache_service.get(cooldown_key):
+                return cache_service.get(cache_key) or []
+
             cached_data = cache_service.get(cache_key)
             if cached_data is not None:
                 return cached_data
@@ -473,7 +499,10 @@ class AzureAdapter(BaseCloudAdapter):
             cache_service.set(cache_key, final_trends, ttl_seconds=3600)
             return final_trends
         except Exception as e:
-            logger.error(f"Azure Daily Billing Sync Failed: {e}")
+            if "429" in str(e):
+                cache_service.set(f"azure_billing_cooldown_{sub_id}", True, ttl_seconds=COOLDOWN_TTL)
+            else:
+                logger.error(f"Azure Daily Billing Sync Failed: {e}")
             return cache_service.get(f"azure_trends_{creds.get('subscription_id')}_{days}") or super().get_daily_costs(days, account)
 
     def get_monthly_costs(self, months: int = 6, account: Optional[CloudAccount] = None) -> List[Dict]:
@@ -486,6 +515,11 @@ class AzureAdapter(BaseCloudAdapter):
             sub_id = creds.get('subscription_id')
             
             cache_key = f"azure_history_{sub_id}_{months}"
+            cooldown_key = f"azure_billing_cooldown_{sub_id}"
+
+            if cache_service.get(cooldown_key):
+                return cache_service.get(cache_key) or []
+
             cached_data = cache_service.get(cache_key)
             if cached_data is not None:
                 return cached_data
@@ -528,7 +562,10 @@ class AzureAdapter(BaseCloudAdapter):
             cache_service.set(cache_key, final_history, ttl_seconds=3600)
             return final_history
         except Exception as e:
-            logger.error(f"Azure Monthly Billing Sync Failed: {e}")
+            if "429" in str(e):
+                cache_service.set(f"azure_billing_cooldown_{sub_id}", True, ttl_seconds=COOLDOWN_TTL)
+            else:
+                logger.error(f"Azure Monthly Billing Sync Failed: {e}")
             return cache_service.get(f"azure_history_{creds.get('subscription_id')}_{months}") or super().get_monthly_costs(months, account)
     def get_clusters(self, account: CloudAccount) -> List[Dict]:
         """Fetch AKS clusters across the subscription."""
