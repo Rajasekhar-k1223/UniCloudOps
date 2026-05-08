@@ -197,7 +197,30 @@ class AzureAdapter(BaseCloudAdapter):
                     except:
                         pass
 
-                # Strategy 4: Tactical Resource Group Walk (Deep Dive)
+                # Strategy 5: Custom Temporal Deep-Scan (From April 23rd)
+                if not query or not query.rows:
+                    logger.info(f"Azure Billing: Standard periods empty, attempting Custom Deep-Scan from April 23rd...")
+                    try:
+                        from azure.mgmt.costmanagement.models import QueryTimePeriod
+                        custom_period = QueryTimePeriod(from_property="2026-04-23T00:00:00Z", to="2026-05-08T23:59:59Z")
+                        query = cost_client.query.usage(
+                            scope=scope,
+                            parameters={
+                                "type": "ActualCost",
+                                "timeframe": "Custom",
+                                "time_period": custom_period,
+                                "dataset": {
+                                    "granularity": "None",
+                                    "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+                                    "grouping": [{"type": "Dimension", "name": "Currency"}]
+                                }
+                            }
+                        )
+                        logger.info(f"Azure Billing Custom Scan Result: {query.rows if query else 'None'}")
+                    except Exception as ce:
+                        logger.debug(f"Custom Deep-Scan failed: {ce}")
+
+                # Strategy 6: Tactical Resource Group Walk (Deep Dive)
                 if not query or not query.rows:
                     logger.info(f"Azure Billing: Direct query failed, performing tactical walk across Resource Groups...")
                     try:
