@@ -698,7 +698,7 @@ class AzureAdapter(BaseCloudAdapter):
                     "dataset": {
                         "granularity": "Monthly",
                         "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
-                        "grouping": [{"type": "Dimension", "name": "Currency"}]
+                        "grouping": [{"type": "Dimension", "name": "ServiceName"}]
                     }
                 }
             )
