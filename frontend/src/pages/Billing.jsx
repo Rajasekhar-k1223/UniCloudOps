@@ -36,6 +36,24 @@ const Billing = () => {
     fetchBillingData();
   }, [user?.project_id]);
 
+  const refreshData = async () => {
+    setLoading(true);
+    try {
+      const [trendsRes, historyRes, recsRes] = await Promise.all([
+        api.get('/billing/trends?days=30&refresh=true'),
+        api.get('/billing/history?months=6&refresh=true'),
+        api.get('/billing/recommendations')
+      ]);
+      setTrends(trendsRes.data);
+      setHistory(historyRes.data);
+      setRecommendations(recsRes.data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Get unique providers from the first row to create dynamic bars (in production we'd aggregate keys)
   // Extract all unique providers across the entire trend timeline
   const providers = trends.reduce((acc, curr) => {
@@ -53,6 +71,18 @@ const Billing = () => {
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-between items-center mb-2">
+        <h1 className="text-xl font-bold text-gray-800">Financial Intelligence</h1>
+        <button 
+          onClick={refreshData}
+          disabled={loading}
+          className="flex items-center gap-2 px-4 py-2 bg-white/50 border border-white/40 rounded-xl text-[10px] font-bold text-gray-600 hover:bg-white/80 transition-all disabled:opacity-50"
+        >
+          <Clock className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+          {loading ? 'SYNCING LIVE DATA...' : 'FORCE REFRESH REAL DATA'}
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <div className="glass-panel p-5 bg-white/50 border-white/40">
            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Target Monthly OpEx</p>

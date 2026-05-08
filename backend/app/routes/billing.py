@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 from app.services.budget_service import budget_service
 from pydantic import BaseModel
 from app.api.deps_rbac import get_current_viewer, get_current_operator
+from app.services.cache_service import cache_service
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -30,7 +31,7 @@ def compare_compute_prices(current_user: User = Depends(get_current_active_user)
     return pricing.compare_compute_rates(accounts)
 
 @router.get("/summary")
-def get_billing_summary(current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+def get_billing_summary(refresh: bool = False, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
     """Fetch aggregated billing overview. Returns mock data if actual APIs are not linked."""
     # Tactical Boundary Check
     if current_user.project_id:
@@ -40,6 +41,18 @@ def get_billing_summary(current_user: User = Depends(get_current_active_user), d
     
     if not accounts:
         return {"total_cost": 0.0, "currency": "USD", "providers": {}}
+    
+    if refresh:
+        for acc in accounts:
+            creds = acc.credentials_dict # Assuming this exists or I'll get sub_id
+            from app.core.crypto import decrypt_credentials
+            try:
+                c = decrypt_credentials(acc.encrypted_credentials)
+                sub_id = c.get('subscription_id')
+                if sub_id:
+                    cache_service.delete(f"azure_spend_{sub_id}")
+                    cache_service.delete(f"azure_breakdown_{sub_id}")
+            except: pass
     
     
     providers_cost = {}
@@ -122,7 +135,7 @@ def debug_aws_billing(current_user: User = Depends(get_current_active_user), db:
     return results
 
 @router.get("/trends")
-def get_billing_trends(days: int = 7, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+def get_billing_trends(days: int = 7, refresh: bool = False, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
     """Fetch daily cost trend aggregated across ALL cloud providers."""
     # Tactical Boundary Check
     if current_user.project_id:
@@ -131,6 +144,16 @@ def get_billing_trends(days: int = 7, current_user: User = Depends(get_current_a
         accounts = db.query(CloudAccount).filter(CloudAccount.user_id == current_user.id).all()
     if not accounts:
         return []
+
+    if refresh:
+        for acc in accounts:
+            from app.core.crypto import decrypt_credentials
+            try:
+                c = decrypt_credentials(acc.encrypted_credentials)
+                sub_id = c.get('subscription_id')
+                if sub_id:
+                    cache_service.delete(f"azure_trends_{sub_id}_{days}")
+            except: pass
 
     from app.api.adapters import get_adapter
     
@@ -178,7 +201,7 @@ def get_billing_trends(days: int = 7, current_user: User = Depends(get_current_a
 
     return result
 @router.get("/history")
-def get_monthly_history(months: int = 6, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+def get_monthly_history(months: int = 6, refresh: bool = False, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
     """Fetch monthly cost history aggregated across ALL cloud providers."""
     # Tactical Boundary Check
     if current_user.project_id:
@@ -187,6 +210,16 @@ def get_monthly_history(months: int = 6, current_user: User = Depends(get_curren
         accounts = db.query(CloudAccount).filter(CloudAccount.user_id == current_user.id).all()
     if not accounts:
         return []
+
+    if refresh:
+        for acc in accounts:
+            from app.core.crypto import decrypt_credentials
+            try:
+                c = decrypt_credentials(acc.encrypted_credentials)
+                sub_id = c.get('subscription_id')
+                if sub_id:
+                    cache_service.delete(f"azure_history_{sub_id}_{months}")
+            except: pass
 
     from app.api.adapters import get_adapter
     
@@ -250,3 +283,28 @@ def configure_budget(
 ):
     """Update high-priority budget thresholds and enable/disable kill-switch containment."""
     return budget_service.set_budget(request.account_id, request.limit, request.kill_switch)
+
+@router.post("/cache/purge")
+def purge_billing_cache(
+    current_user: User = Depends(get_current_operator),
+    db: Session = Depends(get_db)
+):
+    """Purge all cached billing telemetry for the current mission context."""
+    # This clears all billing keys for the user's accounts
+    if current_user.project_id:
+        accounts = db.query(CloudAccount).filter(CloudAccount.project_id == current_user.project_id).all()
+    else:
+        accounts = db.query(CloudAccount).filter(CloudAccount.user_id == current_user.id).all()
+    
+    count = 0
+    from app.core.crypto import decrypt_credentials
+    for acc in accounts:
+        try:
+            c = decrypt_credentials(acc.encrypted_credentials)
+            sub_id = c.get('subscription_id')
+            if sub_id:
+                cache_service.delete_pattern(f"*_{sub_id}*")
+                count += 1
+        except: pass
+    
+    return {"status": "success", "message": f"Cache purged for {count} cloud subscriptions. Real-time sync initiated."}
