@@ -117,7 +117,7 @@ class AzureAdapter(BaseCloudAdapter):
     def get_images(self, region: str, account: Optional[CloudAccount] = None) -> Dict[str, str]:
         return {"ubuntu": "Canonical:0001-com-ubuntu-server-jammy:22_04-lts:latest"}
 
-    def get_monthly_spend(self, account: Optional[CloudAccount] = None) -> float:
+    def get_monthly_spend(self, account: Optional[CloudAccount] = None, refresh: bool = False) -> float:
         if not account: return 0.0
         _, _, _, cost_client, _ = self._get_clients(account)
         if not cost_client: return 0.0
@@ -125,103 +125,106 @@ class AzureAdapter(BaseCloudAdapter):
         try:
             creds = decrypt_credentials(account.encrypted_credentials)
             sub_id = creds.get('subscription_id')
+            scope = f'/subscriptions/{sub_id}'
             
-            # 🕵️ Tactical Cache Check
+            # 🔐 Global Billing Lock: Ensure only one thread/process hits Azure Cost API at a time
+            lock_key = f"azure_billing_lock_{sub_id}"
             cache_key = f"azure_spend_{sub_id}"
             cooldown_key = f"azure_billing_cooldown_{sub_id}"
-            
+
+            # 🕵️ Tactical Cache Check
+            if not refresh:
+                cached_data = cache_service.get(cache_key)
+                if cached_data is not None:
+                    return cached_data
+
             # 🕵️ Tactical Cooldown Check: Stop API spam if already rate-limited
             if cache_service.get(cooldown_key):
                 return cache_service.get(cache_key) or 0.0
 
-            cached_data = cache_service.get(cache_key)
-            if cached_data is not None:
-                return cached_data
+            if not cache_service.set(lock_key, "locked", ttl_seconds=30): # Acquire lock
+                logger.debug(f"Azure Billing: Lock active for {sub_id}, serving cache...")
+                return cache_service.get(cache_key) or 0.0
 
-            scope = f'/subscriptions/{sub_id}'
-            
-            from azure.mgmt.costmanagement.models import QueryDefinition, QueryTimePeriod, QueryDataset, QueryAggregation
-            
-            def run_cost_query(q_type, timeframe):
-                try:
-                    return cost_client.query.usage(
-                        scope=scope,
-                        parameters={
-                            "type": q_type,
-                            "timeframe": timeframe,
-                            "dataset": {
-                                "granularity": "None",
-                                "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
-                                "grouping": [{"type": "Dimension", "name": "Currency"}]
-                            }
-                        }
-                    )
-                except Exception as e:
-                    logger.debug(f"Cost Query Failed ({q_type}, {timeframe}): {e}")
-                    return None
-
-            # Strategy 1: Actual Cost MonthToDate
-            query = run_cost_query("ActualCost", "MonthToDate")
-            
-            # Strategy 2: Fallback to Amortized Cost (some Enterprise agreements)
-            if not query or not query.rows:
-                logger.info(f"Azure Billing: ActualCost empty for {sub_id}, trying AmortizedCost...")
-                query = run_cost_query("AmortizedCost", "MonthToDate")
-
-            # Strategy 4: Resource Group Aggregation (High Fidelity Fallback)
-            if not query or not query.rows:
-                logger.info(f"Azure Billing: Sub-level query empty, attempting ResourceGroup aggregation...")
-                try:
-                    query = cost_client.query.usage(
-                        scope=scope,
-                        parameters={
-                            "type": "ActualCost",
-                            "timeframe": "MonthToDate",
-                            "dataset": {
-                                "granularity": "None",
-                                "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
-                                "grouping": [{"type": "Dimension", "name": "ResourceGroup"}]
-                            }
-                        }
-                    )
-                except:
-                    pass
-
-            logger.info(f"Azure Billing API Final Trace [{sub_id}]: Rows={query.rows if (query and query.rows) else 'Empty'}")
-            
-            total_cost = 0.0
-            if query and query.rows:
-                for row in query.rows:
-                    if not row or row[0] is None: continue
-                    cost = float(row[0])
-                    # In grouping by ResourceGroup, Currency is usually not in the first 2 columns unless added
-                    # We'll assume the primary currency of the subscription (likely INR based on user data)
-                    
-                    # If we have 6.3k INR, it should be ~76 USD.
-                    # We will attempt to detect currency if available, otherwise default to INR for this specific user context
-                    currency = "INR" 
-                    if len(row) > 1 and len(str(row[1])) == 3: # Likely currency code
-                        currency = str(row[1])
-                    
-                    if currency == "INR" or cost > 1000: # Heuristic: if cost is high and user is in India
-                        cost = cost / 83.5
-                    
-                    total_cost += cost
+            try:
+                from azure.mgmt.costmanagement.models import QueryDefinition, QueryTimePeriod, QueryDataset, QueryAggregation
                 
-                final_cost = round(total_cost, 2)
-                cache_service.set(cache_key, final_cost, ttl_seconds=3600)
-                return final_cost
-            else:
-                logger.warning(f"Azure Billing: All cost queries returned zero for {sub_id}. Attempting hardcoded fallback for known RGs.")
-            return 0.0
+                def run_cost_query(q_type, timeframe):
+                    try:
+                        import time
+                        time.sleep(1) # Tactical pause to avoid Azure 429 bursts
+                        return cost_client.query.usage(
+                            scope=scope,
+                            parameters={
+                                "type": q_type,
+                                "timeframe": timeframe,
+                                "dataset": {
+                                    "granularity": "None",
+                                    "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+                                    "grouping": [{"type": "Dimension", "name": "Currency"}]
+                                }
+                            }
+                        )
+                    except Exception as e:
+                        if "429" in str(e): raise e
+                        logger.debug(f"Cost Query Failed ({q_type}, {timeframe}): {e}")
+                        return None
+
+                # Strategy 1: Actual Cost MonthToDate
+                query = run_cost_query("ActualCost", "MonthToDate")
+                
+                # Strategy 2: Fallback to Amortized Cost
+                if not query or not query.rows:
+                    logger.info(f"Azure Billing: ActualCost empty for {sub_id}, trying AmortizedCost...")
+                    query = run_cost_query("AmortizedCost", "MonthToDate")
+
+                # Strategy 3: Fallback to Resource Group Aggregation
+                if not query or not query.rows:
+                    logger.info(f"Azure Billing: Sub-level query empty, attempting ResourceGroup aggregation...")
+                    try:
+                        query = cost_client.query.usage(
+                            scope=scope,
+                            parameters={
+                                "type": "ActualCost",
+                                "timeframe": "MonthToDate",
+                                "dataset": {
+                                    "granularity": "None",
+                                    "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+                                    "grouping": [{"type": "Dimension", "name": "ResourceGroup"}]
+                                }
+                            }
+                        )
+                    except:
+                        pass
+
+                logger.info(f"Azure Billing API Final Trace [{sub_id}]: Rows={query.rows if (query and query.rows) else 'Empty'}")
+                
+                total_cost = 0.0
+                if query and query.rows:
+                    for row in query.rows:
+                        if not row or row[0] is None: continue
+                        cost = float(row[0])
+                        currency = "INR" # Default to INR based on user profile
+                        if len(row) > 1 and len(str(row[1])) == 3:
+                            currency = str(row[1])
+                        
+                        if currency == "INR" or cost > 1000:
+                            cost = cost / 83.5
+                        
+                        total_cost += cost
+                    
+                    final_cost = round(total_cost, 2)
+                    cache_service.set(cache_key, final_cost, ttl_seconds=3600)
+                    return final_cost
+                return 0.0
+            finally:
+                cache_service.delete_pattern(lock_key)
         except Exception as e:
             if "429" in str(e):
                 logger.warning(f"Azure Rate Limit Triggered for {sub_id}. Entering {COOLDOWN_TTL}s cooldown.")
                 cache_service.set(f"azure_billing_cooldown_{sub_id}", True, ttl_seconds=COOLDOWN_TTL)
             else:
                 logger.error(f"Azure Monthly Spend Sync Failed: {e}")
-            
-            # Fallback to cache if possible on error (Rate Limit avoidance)
             return cache_service.get(f"azure_spend_{creds.get('subscription_id')}") or 0.0
 
     def get_metrics(self, instance_id: str, region: str, account: Optional[CloudAccount] = None, resource_type: str = 'Compute') -> Dict:
@@ -447,22 +450,35 @@ class AzureAdapter(BaseCloudAdapter):
             # Lightweight billing check to verify Cost Management permissions
             creds = decrypt_credentials(account.encrypted_credentials)
             sub_id = creds.get('subscription_id')
+            cooldown_key = f"azure_billing_cooldown_{sub_id}"
+            
             billing_ok = False
-            try:
-                # Just check if we can call the API (even if 0 rows)
-                cost_client.query.usage(scope=f'/subscriptions/{sub_id}', parameters={
-                    "type": "Usage", "timeframe": "MonthToDate", 
-                    "dataset": {"granularity": "None", "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}}}
-                })
+            if cache_service.get(cooldown_key):
+                # If in cooldown, we assume it's working but rate-limited
                 billing_ok = True
-            except Exception as be:
-                logger.warning(f"Azure Connectivity: Billing access check failed: {be}")
+                note = "Rate Limited (Cooling Down)"
+            else:
+                try:
+                    # Just check if we can call the API (even if 0 rows)
+                    cost_client.query.usage(scope=f'/subscriptions/{sub_id}', parameters={
+                        "type": "ActualCost", "timeframe": "MonthToDate", 
+                        "dataset": {"granularity": "None", "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}}}
+                    })
+                    billing_ok = True
+                    note = "Complete"
+                except Exception as be:
+                    if "429" in str(be):
+                        billing_ok = True
+                        note = "Rate Limited"
+                    else:
+                        logger.warning(f"Azure Connectivity: Billing access check failed: {be}")
+                        note = "No Billing Access"
 
             return {
                 "authenticated": True, 
                 "access": True, 
                 "billing_access": billing_ok,
-                "note": "Complete" if billing_ok else "No Billing Access"
+                "note": note
             }
         except:
             return {"authenticated": False}
