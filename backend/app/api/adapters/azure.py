@@ -146,7 +146,7 @@ class AzureAdapter(BaseCloudAdapter):
             query = cost_client.query.usage(
                 scope=scope,
                 parameters={
-                    "type": "Usage",
+                    "type": "ActualCost",
                     "timeframe": "MonthToDate",
                     "dataset": {
                         "granularity": "None",
@@ -155,6 +155,8 @@ class AzureAdapter(BaseCloudAdapter):
                     }
                 }
             )
+            
+            logger.info(f"Azure Billing API Trace [{sub_id}]: Rows={query.rows}")
             
             total_cost = 0.0
             if query.rows:
@@ -361,7 +363,7 @@ class AzureAdapter(BaseCloudAdapter):
             query = cost_client.query.usage(
                 scope=scope,
                 parameters={
-                    "type": "Usage",
+                    "type": "ActualCost",
                     "timeframe": "MonthToDate",
                     "dataset": {
                         "granularity": "None",
@@ -370,6 +372,8 @@ class AzureAdapter(BaseCloudAdapter):
                     }
                 }
             )
+            
+            logger.info(f"Azure Breakdown API Trace [{sub_id}]: {len(query.rows)} services identified.")
             
             breakdown = {}
             if query.rows:
@@ -492,7 +496,7 @@ class AzureAdapter(BaseCloudAdapter):
             query = cost_client.query.usage(
                 scope=scope,
                 parameters={
-                    "type": "Usage",
+                    "type": "ActualCost",
                     "timeframe": "MonthToDate", # Simplified for now to stay within SDK limits
                     "dataset": {
                         "granularity": "Daily",
@@ -501,6 +505,8 @@ class AzureAdapter(BaseCloudAdapter):
                     }
                 }
             )
+            
+            logger.info(f"Azure Daily Trends Trace [{sub_id}]: {len(query.rows)} data points found.")
             
             trends_map = {}
             if query.rows:
