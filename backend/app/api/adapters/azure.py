@@ -600,7 +600,7 @@ class AzureAdapter(BaseCloudAdapter):
     def get_daily_costs(self, days: int = 7, account: Optional[CloudAccount] = None) -> List[Dict]:
         if not account: return []
         _, _, _, cost_client, _ = self._get_clients(account)
-        if not cost_client: return super().get_daily_costs(days, account)
+        if not cost_client: return []
         
         try:
             creds = decrypt_credentials(account.encrypted_credentials)
@@ -618,12 +618,16 @@ class AzureAdapter(BaseCloudAdapter):
 
             scope = '/subscriptions/' + sub_id
             
-            # Azure Query for the last N days (using MonthToDate for stability)
+            # Azure Query from Account Lifecycle Start (April 23)
+            from azure.mgmt.costmanagement.models import QueryTimePeriod
+            custom_period = QueryTimePeriod(from_property="2026-04-23T00:00:00Z", to="2026-05-31T23:59:59Z")
+            
             query = cost_client.query.usage(
                 scope=scope,
                 parameters={
                     "type": "ActualCost",
-                    "timeframe": "MonthToDate",
+                    "timeframe": "Custom",
+                    "time_period": custom_period,
                     "dataset": {
                         "granularity": "Daily",
                         "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
