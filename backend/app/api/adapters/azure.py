@@ -6,6 +6,7 @@ from app.models.cloud_account import CloudAccount
 from app.utils.retry import universal_retry
 from app.core.crypto import decrypt_credentials
 from datetime import datetime
+from app.services.cache_service import cache_service
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,13 @@ class AzureAdapter(BaseCloudAdapter):
         try:
             creds = decrypt_credentials(account.encrypted_credentials)
             sub_id = creds.get('subscription_id')
+            
+            # 🕵️ Tactical Cache Check
+            cache_key = f"azure_spend_{sub_id}"
+            cached_data = cache_service.get(cache_key)
+            if cached_data is not None:
+                return cached_data
+
             scope = f'/subscriptions/{sub_id}'
             
             from azure.mgmt.costmanagement.models import QueryDefinition, QueryTimePeriod, QueryDataset, QueryAggregation
@@ -151,11 +159,15 @@ class AzureAdapter(BaseCloudAdapter):
                         cost = cost / 83.5
                     
                     total_cost += cost
-                return round(total_cost, 2)
+                
+                final_cost = round(total_cost, 2)
+                cache_service.set(cache_key, final_cost, ttl_seconds=3600)
+                return final_cost
             return 0.0
         except Exception as e:
             logger.error(f"Azure Monthly Spend Sync Failed: {e}")
-            return 0.0
+            # Fallback to cache if possible on error (Rate Limit avoidance)
+            return cache_service.get(f"azure_spend_{creds.get('subscription_id')}") or 0.0
 
     def get_metrics(self, instance_id: str, region: str, account: Optional[CloudAccount] = None, resource_type: str = 'Compute') -> Dict:
         """Fetch Azure Monitor metrics with simulation fallback."""
@@ -316,7 +328,14 @@ class AzureAdapter(BaseCloudAdapter):
         
         try:
             creds = decrypt_credentials(account.encrypted_credentials)
-            scope = '/subscriptions/' + creds.get('subscription_id')
+            sub_id = creds.get('subscription_id')
+            
+            cache_key = f"azure_breakdown_{sub_id}"
+            cached_data = cache_service.get(cache_key)
+            if cached_data is not None:
+                return cached_data
+
+            scope = '/subscriptions/' + sub_id
             
             query = cost_client.query.usage(
                 scope=scope,
@@ -339,10 +358,12 @@ class AzureAdapter(BaseCloudAdapter):
                 if len(row) > 2 and row[2] == "INR":
                     cost = cost / 83.5
                 breakdown[service] = round(cost, 2)
+            
+            cache_service.set(cache_key, breakdown, ttl_seconds=3600)
             return breakdown
         except Exception as e:
             logger.error(f"Azure Billing Breakdown Sync Failed: {e}")
-            return {}
+            return cache_service.get(f"azure_breakdown_{creds.get('subscription_id')}") or {}
     
     def verify_connectivity(self, account: CloudAccount) -> Dict:
         try:
@@ -405,7 +426,14 @@ class AzureAdapter(BaseCloudAdapter):
         
         try:
             creds = decrypt_credentials(account.encrypted_credentials)
-            scope = '/subscriptions/' + creds.get('subscription_id')
+            sub_id = creds.get('subscription_id')
+            
+            cache_key = f"azure_trends_{sub_id}_{days}"
+            cached_data = cache_service.get(cache_key)
+            if cached_data is not None:
+                return cached_data
+
+            scope = '/subscriptions/' + sub_id
             
             # Azure Query for the last N days
             query = cost_client.query.usage(
@@ -441,10 +469,12 @@ class AzureAdapter(BaseCloudAdapter):
                     trends_map[formatted_date] = 0.0
                 trends_map[formatted_date] += cost
             
-            return [{"date": d, "azure": round(c, 2)} for d, c in trends_map.items()]
+            final_trends = [{"date": d, "azure": round(c, 2)} for d, c in trends_map.items()]
+            cache_service.set(cache_key, final_trends, ttl_seconds=3600)
+            return final_trends
         except Exception as e:
             logger.error(f"Azure Daily Billing Sync Failed: {e}")
-            return super().get_daily_costs(days, account)
+            return cache_service.get(f"azure_trends_{creds.get('subscription_id')}_{days}") or super().get_daily_costs(days, account)
 
     def get_monthly_costs(self, months: int = 6, account: Optional[CloudAccount] = None) -> List[Dict]:
         if not account: return []
@@ -453,7 +483,14 @@ class AzureAdapter(BaseCloudAdapter):
         
         try:
             creds = decrypt_credentials(account.encrypted_credentials)
-            scope = '/subscriptions/' + creds.get('subscription_id')
+            sub_id = creds.get('subscription_id')
+            
+            cache_key = f"azure_history_{sub_id}_{months}"
+            cached_data = cache_service.get(cache_key)
+            if cached_data is not None:
+                return cached_data
+
+            scope = '/subscriptions/' + sub_id
             
             query = cost_client.query.usage(
                 scope=scope,
@@ -487,10 +524,12 @@ class AzureAdapter(BaseCloudAdapter):
                     history_map[formatted_month] = 0.0
                 history_map[formatted_month] += cost
                 
-            return [{"month": m, "azure": round(c, 2)} for m, c in history_map.items()]
+            final_history = [{"month": m, "azure": round(c, 2)} for m, c in history_map.items()]
+            cache_service.set(cache_key, final_history, ttl_seconds=3600)
+            return final_history
         except Exception as e:
             logger.error(f"Azure Monthly Billing Sync Failed: {e}")
-            return super().get_monthly_costs(months, account)
+            return cache_service.get(f"azure_history_{creds.get('subscription_id')}_{months}") or super().get_monthly_costs(months, account)
     def get_clusters(self, account: CloudAccount) -> List[Dict]:
         """Fetch AKS clusters across the subscription."""
         # We use ContainerServiceManagementClient which is already in _get_azure_libs
