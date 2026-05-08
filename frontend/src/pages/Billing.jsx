@@ -76,7 +76,7 @@ const Billing = () => {
         <button 
           onClick={refreshData}
           disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 bg-white/50 border border-white/40 rounded-xl text-[10px] font-bold text-gray-600 hover:bg-white/80 transition-all disabled:opacity-50"
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 border border-blue-500 rounded-xl text-[10px] font-bold text-white hover:bg-blue-700 shadow-lg shadow-blue-600/20 transition-all disabled:opacity-50"
         >
           <Clock className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
           {loading ? 'SYNCING LIVE DATA...' : 'FORCE REFRESH REAL DATA'}
