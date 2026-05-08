@@ -402,39 +402,45 @@ class AWSAdapter(BaseCloudAdapter):
         }
         return catalog.get(category.lower(), [])
 
-
-    def get_monthly_spend(self, account: Optional[CloudAccount] = None) -> float:
-        """Fetch actual usage metrics from AWS Cost Explorer."""
+    def get_monthly_spend(self, account: Optional[CloudAccount] = None, refresh: bool = False) -> float:
+        """Fetch actual usage metrics from AWS Cost Explorer with caching."""
         if not account: return 0.0
+        from app.services.cache_service import cache_service
+        from app.core.crypto import decrypt_credentials
+        
         try:
-            session = self._get_session(account)
-            ce = session.client('ce', region_name='us-east-1') # Cost Explorer is global but requires us-east-1
-            
-            from datetime import datetime, date
-            today = date.today()
-            first_day = today.replace(day=1)
-            
-            # If today is the 1st of the month, the End date needs to be slightly in the future or we fetch last month
-            end_date = today.strftime('%Y-%m-%d')
-            start_date = first_day.strftime('%Y-%m-%d')
-            
-            if start_date == end_date:
-                from datetime import timedelta
-                end_date = (today + timedelta(days=1)).strftime('%Y-%m-%d')
+            creds = decrypt_credentials(account.encrypted_credentials)
+            aws_id = creds.get('aws_account_id') or str(account.id)
+            cache_key = f"aws_spend_{aws_id}"
+            lock_key = f"cloud_billing_lock_{aws_id}"
 
-            result = ce.get_cost_and_usage(
-                TimePeriod={
-                    'Start': start_date,
-                    'End': end_date
-                },
-                Granularity='MONTHLY',
-                Metrics=['UnblendedCost']
-            )
-            
-            return float(result['ResultsByTime'][0]['Total']['UnblendedCost']['Amount'])
+            if not refresh:
+                cached = cache_service.get(cache_key)
+                if cached is not None: return float(cached)
+
+            with cache_service.lock(lock_key, timeout=30):
+                session = self._get_session(account)
+                ce = session.client('ce', region_name='us-east-1')
+                
+                from datetime import date, timedelta
+                today = date.today()
+                first_day = today.replace(day=1)
+                
+                # AWS CE End date is exclusive, so we need +1 day for today's data
+                end_date = (today + timedelta(days=1)).strftime('%Y-%m-%d')
+                start_date = first_day.strftime('%Y-%m-%d')
+                
+                result = ce.get_cost_and_usage(
+                    TimePeriod={'Start': start_date, 'End': end_date},
+                    Granularity='MONTHLY',
+                    Metrics=['UnblendedCost']
+                )
+                
+                cost = float(result['ResultsByTime'][0]['Total']['UnblendedCost']['Amount'])
+                cache_service.set(cache_key, cost, ttl_seconds=3600)
+                return cost
         except Exception as e:
-            logger.warning(f"Failed to fetch AWS Cost Explorer data: {e}. Falling back to internal aggregate.")
-            
+            logger.warning(f"AWS Cost Explorer Failure: {e}. Falling back to aggregate.")
             # Fallback to local aggregate if Cost Explorer is disabled or lacks IAM permissions
             from app.db.session import SessionLocal
             from app.models.resource import Resource

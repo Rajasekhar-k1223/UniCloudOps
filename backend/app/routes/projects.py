@@ -158,7 +158,33 @@ def get_project_summary(project_id: int, db: Session = Depends(get_db), current_
     if current_user.role != "ADMIN" and current_user.project_id != project_id:
         raise HTTPException(status_code=403, detail="Access denied: outside your sovereign project")
     
-    account_count = db.query(CloudAccount).filter(CloudAccount.project_id == project_id).count()
+    # 🕵️ Tactical Live Aggregation: Sum up spend from all linked cloud accounts
+    accounts = db.query(CloudAccount).filter(CloudAccount.project_id == project_id).all()
+    total_project_spend = 0.0
+    
+    from app.api.adapters import get_adapter
+    from app.services.cache_service import cache_service
+    from app.core.crypto import decrypt_credentials
+    
+    for account in accounts:
+        try:
+            creds = decrypt_credentials(account.encrypted_credentials)
+            # Universal Identifier extraction for cache lookups
+            uid = creds.get('subscription_id') or creds.get('aws_account_id') or creds.get('project_id') or str(account.id)
+            cache_key = f"{account.provider}_spend_{uid}"
+            
+            cached_spend = cache_service.get(cache_key)
+            if cached_spend is not None:
+                total_project_spend += float(cached_spend)
+        except Exception:
+            continue
+
+    # Update project spend if aggregated total is higher (don't overwrite with 0 on failure)
+    if total_project_spend > 0:
+        project.current_spend_mtd = round(total_project_spend, 2)
+        db.add(project)
+        db.commit()
+
     budget_pct = (project.current_spend_mtd / project.budget_limit * 100) if project.budget_limit > 0 else 0
     alert_breached = budget_pct >= (project.alert_threshold * 100)
     budget_exceeded = project.current_spend_mtd >= project.budget_limit
@@ -173,5 +199,5 @@ def get_project_summary(project_id: int, db: Session = Depends(get_db), current_
         "alert_threshold": project.alert_threshold,
         "alert_breached": alert_breached,
         "budget_exceeded": budget_exceeded,
-        "linked_accounts": account_count,
+        "linked_accounts": len(accounts),
     }
