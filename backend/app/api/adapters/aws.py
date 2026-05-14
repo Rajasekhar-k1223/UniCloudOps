@@ -332,25 +332,37 @@ class AWSAdapter(BaseCloudAdapter):
         ]
 
     def get_network_options(self, region: str, account: Optional[CloudAccount] = None) -> Dict[str, List[Dict]]:
-        if not account: return {"vpcs": [], "subnets": []}
-        session = self._get_session(account, region)
-        if not session: return {"vpcs": [], "subnets": []}
-        ec2 = session.client('ec2')
-        try:
-            vpcs = ec2.describe_vpcs()
-            subnets = ec2.describe_subnets()
+        """Fetch real VPCs and Subnets from the AWS region."""
+        if not account:
+            return {"vpcs": [], "subnets": []}
             
-            vpc_list = []
-            for v in vpcs.get('Vpcs', []):
-                name = next((t['Value'] for t in v.get('Tags', []) if t['Key'] == 'Name'), v['VpcId'])
-                vpc_list.append({"id": v['VpcId'], "name": name, "cidr": v['CidrBlock']})
+        try:
+            session = self._get_session(account)
+            ec2 = session.client('ec2', region_name=region)
+            
+            vpcs_res = ec2.describe_vpcs()
+            subnets_res = ec2.describe_subnets()
+            
+            vpcs = []
+            for vpc in vpcs_res.get('Vpcs', []):
+                name = next((t['Value'] for t in vpc.get('Tags', []) if t['Key'] == 'Name'), vpc['VpcId'])
+                vpcs.append({
+                    "id": vpc['VpcId'],
+                    "name": name,
+                    "cidr": vpc['CidrBlock']
+                })
                 
-            sub_list = []
-            for s in subnets.get('Subnets', []):
-                name = next((t['Value'] for t in s.get('Tags', []) if t['Key'] == 'Name'), s['SubnetId'])
-                sub_list.append({"id": s['SubnetId'], "name": name, "vpc_id": s['VpcId'], "cidr": s.get('CidrBlock', 'N/A')})
+            subnets = []
+            for sub in subnets_res.get('Subnets', []):
+                name = next((t['Value'] for t in sub.get('Tags', []) if t['Key'] == 'Name'), sub['SubnetId'])
+                subnets.append({
+                    "id": sub['SubnetId'],
+                    "name": name,
+                    "vpc_id": sub['VpcId'],
+                    "cidr": sub.get('CidrBlock', 'N/A')
+                })
                 
-            return {"vpcs": vpc_list, "subnets": sub_list}
+            return {"vpcs": vpcs, "subnets": subnets}
         except Exception as e:
             logger.error(f"AWS Network Discovery Failed: {e}")
             return {"vpcs": [], "subnets": []}
@@ -776,3 +788,23 @@ class AWSAdapter(BaseCloudAdapter):
             return []
 
     async def start_rdp_tunnel(self, region: str, instance_id: str, account: CloudAccount): return None, None
+
+    def get_load_balancers(self, region: str, account: Optional[CloudAccount] = None) -> List[Dict]:
+        if not account: return []
+        session = self._get_session(account, region)
+        if not session: return []
+        try:
+            elb = session.client('elbv2')
+            lbs = elb.describe_load_balancers()['LoadBalancers']
+            return [{ 'id': lb['LoadBalancerArn'], 'name': lb['LoadBalancerName'], 'dns_name': lb['DNSName'], 'type': lb['Type'], 'status': lb['State']['Code'] } for lb in lbs]
+        except: return []
+
+    def register_lb_targets(self, lb_id: str, target_group_id: str, resource_external_id: str, region: str, account: CloudAccount) -> Dict:
+        session = self._get_session(account, region)
+        if not session: return {'status': 'error', 'message': 'No session'}
+        try:
+            elb = session.client('elbv2')
+            elb.register_targets(TargetGroupArn=target_group_id, Targets=[{'Id': resource_external_id}])
+            return {'status': 'success', 'message': f'Resource {resource_external_id} registered to Target Group.'}
+        except Exception as e:
+            return {'status': 'error', 'message': str(e)}

@@ -69,3 +69,15 @@ def get_network_topology(
         })
 
     return topology
+
+@router.post("/lb/attach")
+def attach_to_lb(
+    lb_id: str,
+    target_group_arn: str,
+    resource_ids: List[int],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_viewer)
+):
+    """Initiate a mission to attach existing resources to a Load Balancer."""
+    from app.services.network_service import network_service
+    return network_service.attach_resources_to_lb(db, lb_id, target_group_arn, resource_ids)

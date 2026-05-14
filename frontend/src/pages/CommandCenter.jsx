@@ -2,21 +2,30 @@ import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Shield, Activity, Globe, Zap, Server, MessageSquare, AlertTriangle, RefreshCw, BarChart, Maximize2, Minimize2, ShieldCheck } from 'lucide-react';
 import api from '../services/api';
 import '../styles/HolographicOverlay.css';
+import StrategicBriefing from '../components/intelligence/StrategicBriefing';
 
 const CommandCenter = () => {
   const [stats, setStats] = useState({});
   const [threats, setThreats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showBriefing, setShowBriefing] = useState(false);
+  const [projects, setProjects] = useState([]);
+  const [activeProjectId, setActiveProjectId] = useState(null);
 
   const fetchData = async () => {
     try {
-      const [statsRes, threatsRes] = await Promise.all([
+      const [statsRes, threatsRes, projectsRes] = await Promise.all([
         api.get('/security-pulse/stats'),
-        api.get('/security-pulse/threats')
+        api.get('/security-pulse/threats'),
+        api.get('/projects')
       ]);
       setStats(statsRes.data);
       setThreats(threatsRes.data);
+      setProjects(projectsRes.data);
+      if (projectsRes.data.length > 0 && !activeProjectId) {
+        setActiveProjectId(projectsRes.data[0].id);
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -246,6 +255,16 @@ const CommandCenter = () => {
             {/* Bottom Strategic Summary */}
             <div className="p-5 border-t border-white/5 bg-black/60">
                <div className="flex justify-between items-center mb-4">
+                  <span className="text-[9px] font-bold text-white/40 uppercase">Sovereign Intelligence</span>
+                  <button 
+                    onClick={() => setShowBriefing(!showBriefing)}
+                    className="text-[9px] font-black text-cyan-400 uppercase tracking-widest flex items-center gap-2 hover:text-white transition"
+                  >
+                    <Brain size={12} /> {showBriefing ? 'Close Advisor' : 'Request Briefing'}
+                  </button>
+               </div>
+               
+               <div className="flex justify-between items-center mb-4">
                   <span className="text-[9px] font-bold text-white/40 uppercase">HQ Boundary Integrity</span>
                   <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">100% Operational</span>
                </div>
@@ -257,6 +276,21 @@ const CommandCenter = () => {
                </button>
             </div>
          </div>
+         
+         {/* Strategic Briefing Overlay */}
+         {showBriefing && (
+           <div className="fixed inset-0 z-[300] bg-black/80 backdrop-blur-md flex items-center justify-center p-6 sm:p-20">
+              <div className="w-full max-w-4xl h-full max-h-[80vh] relative">
+                 <button 
+                   onClick={() => setShowBriefing(false)}
+                   className="absolute -top-12 right-0 text-white/40 hover:text-white flex items-center gap-2 uppercase text-[10px] font-black tracking-widest"
+                 >
+                   Terminate Uplink <Maximize2 size={16} />
+                 </button>
+                 <StrategicBriefing projectId={activeProjectId} />
+              </div>
+           </div>
+         )}
       </main>
 
       <style dangerouslySetInnerHTML={{ __html: `

@@ -24,5 +24,7 @@ class TerraformService:
         """
         Generates a tactical preview plan without applying changes.
         """
-        # In a real mission, this would run 'terraform plan'
-        return "Terraform Plan: 1 to add, 0 to change, 0 to destroy."
+        try:
+            return run_terraform_in_docker(template_content, env_vars, op="plan")
+        except Exception as e:
+            return f"Plan generation failed: {str(e)}"

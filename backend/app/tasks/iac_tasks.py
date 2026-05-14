@@ -15,20 +15,19 @@ from app.tasks.sync_tasks import sync_cloud_resources_logic
 
 logger = logging.getLogger(__name__)
 
-def run_terraform_in_docker(template_content: str, env_vars: Dict[str, str], deployment_id: Optional[int] = None, destroy: bool = False) -> str:
+def run_terraform_in_docker(template_content: str, env_vars: Dict[str, str], deployment_id: Optional[int] = None, op: str = "apply") -> str:
     """Run Terraform inside a docker container and stream logs to DB if deployment_id is provided."""
     client = docker.from_env()
     full_logs = ""
     
     try:
         # 🚀 Engagement of Persistent Plugin Cache 🚀
-        # Prevents TLS timeouts by caching provider binaries (azurerm, aws, etc.) locally.
         host_cache_path = "c:/Rajasekhar/UniCloudOps/data/terraform_cache"
-        
-        # Inject Cache Config into Environment
+        if not os.path.exists(host_cache_path):
+            os.makedirs(host_cache_path, exist_ok=True)
+            
         env_vars["TF_PLUGIN_CACHE_DIR"] = "/terraform_cache"
         
-        op = "destroy" if destroy else "apply"
         container = client.containers.create(
             "hashicorp/terraform:latest",
             command=["/app/mission.sh"],
@@ -42,13 +41,12 @@ def run_terraform_in_docker(template_content: str, env_vars: Dict[str, str], dep
         )
         
         # 📦 Prepare Mission Assets (Tar Archive) 📦
-        # We inject both main.tf and a tactical mission.sh script for reliable execution
         deployment_script = f"""#!/bin/sh
 set -e
-echo "🚀 Mission Provisioning Sequence Initiated..."
+echo "🚀 Mission Provisioning Sequence Initiated: {op.upper()}"
 terraform init -no-color
 echo "🛡️ Blueprints validated. Engaging infrastructure providers..."
-terraform {op} -auto-approve -no-color
+terraform {op} {"-auto-approve" if op in ["apply", "destroy"] else ""} -no-color
 echo "✅ Mission Success. Resource lifecycle confirmed."
 """
         tar_stream = io.BytesIO()
@@ -152,6 +150,61 @@ echo "✅ Mission Success. Resource lifecycle confirmed."
         logger.error(f"Terraform Docker execution failed: {e}")
         return f"Error: {str(e)}\n\nPartial Logs:\n{full_logs}"
 
+def run_cdk_in_docker(template_content: str, env_vars: Dict[str, str], deployment_id: Optional[int] = None, op: str = "deploy") -> str:
+    """Run AWS CDK inside a docker container."""
+    client = docker.from_env()
+    full_logs = ""
+    
+    try:
+        # CDK requires AWS credentials and a working Node environment
+        container = client.containers.create(
+            "node:18-alpine",
+            command=["/app/mission.sh"],
+            entrypoint=["/bin/sh"],
+            environment=env_vars,
+            working_dir='/app',
+            detach=True
+        )
+        
+        deployment_script = f"""#!/bin/sh
+set -e
+echo "🚀 CDK Mission Sequence Initiated: {op.upper()}"
+npm install -g aws-cdk
+cdk --version
+echo "🛡️ Blueprints validated. Synthesizing infrastructure..."
+# Note: In production, we'd need to handle project structure. 
+# For now, we assume the template is a standalone CDK app file.
+echo "{template_content.replace('"', '\\"')}" > app.js
+cdk {op} --app "node app.js" --require-approval never --no-color
+echo "✅ CDK Mission Success."
+"""
+        tar_stream = io.BytesIO()
+        with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+            sh_bytes = deployment_script.encode('utf-8')
+            sh_info = tarfile.TarInfo(name="mission.sh")
+            sh_info.size = len(sh_bytes)
+            sh_info.mode = 0o755
+            tar.addfile(sh_info, io.BytesIO(sh_bytes))
+        
+        tar_stream.seek(0)
+        container.put_archive("/app", tar_stream)
+        
+        container.start()
+        
+        db = SessionLocal() if deployment_id else None
+        for line in container.logs(stream=True):
+            decoded_line = line.decode("utf-8")
+            full_logs += decoded_line
+            # Stream logs to DB if needed (same as terraform logic)
+        
+        container.wait()
+        container.remove()
+        if db: db.close()
+        return full_logs
+    except Exception as e:
+        logger.error(f"CDK Docker execution failed: {e}")
+        return f"Error: {str(e)}\n\nPartial Logs:\n{full_logs}"
+
 @celery_app.task(name="execute_iac_deployment")
 def execute_iac_deployment(deployment_id: int, destroy: bool = False):
     """Executes Terraform or CDK inside a docker container with real-time logging."""
@@ -221,9 +274,13 @@ def execute_iac_deployment(deployment_id: int, destroy: bool = False):
     from app.services.notification_service import notification_service
     try:
         if template.iac_type == "terraform":
-            logs = run_terraform_in_docker(template.content, env_vars, deployment_id, destroy=destroy)
+            op = "destroy" if destroy else "apply"
+            logs = run_terraform_in_docker(template.content, env_vars, deployment_id, op=op)
+        elif template.iac_type == "cdk":
+            op = "destroy" if destroy else "deploy"
+            logs = run_cdk_in_docker(template.content, env_vars, deployment_id, op=op)
         else:
-            logs = "CDK Deployment simulation starting...\nPhase 5: Streaming Logs Enabled.\nCDK Deploy started...\nSuccess."
+            logs = f"Unsupported IaC type: {template.iac_type}"
             
         # Ensure logs don't exceed DB capacity (limiting to 60k characters for safe storage)
         if len(logs) > 60000:

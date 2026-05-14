@@ -92,3 +92,13 @@ def sync_cloud_account(account_id: int, db: Session = Depends(get_db), current_u
     from app.tasks.sync_tasks import sync_cloud_resources
     sync_cloud_resources.delay(account.id)
     return {"status": "sync_triggered"}
+
+@router.get("/{account_id}/identities")
+def get_account_identities(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Fetch all IAM identities (Users/Roles) for a specific cloud account."""
+    from app.services.iam_service import iam_service
+    account = db.query(CloudAccount).filter(CloudAccount.id == account_id, CloudAccount.user_id == current_user.id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    return iam_service._get_aws_iam(account) if account.provider == 'aws' else iam_service._get_azure_ad(account)

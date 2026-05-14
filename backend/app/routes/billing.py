@@ -16,6 +16,7 @@ from app.services.budget_service import budget_service
 from pydantic import BaseModel
 from app.api.deps_rbac import get_current_viewer, get_current_operator
 from app.services.cache_service import cache_service
+from app.services.forecast_service import forecast_service
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -43,16 +44,20 @@ def get_billing_summary(refresh: bool = False, current_user: User = Depends(get_
         return {"total_cost": 0.0, "currency": "USD", "providers": {}}
     
     if refresh:
+        from app.core.crypto import decrypt_credentials
         for acc in accounts:
-            creds = acc.credentials_dict # Assuming this exists or I'll get sub_id
-            from app.core.crypto import decrypt_credentials
             try:
                 c = decrypt_credentials(acc.encrypted_credentials)
-                sub_id = c.get('subscription_id')
-                if sub_id:
-                    cache_service.delete(f"azure_spend_{sub_id}")
-                    cache_service.delete(f"azure_breakdown_{sub_id}")
-            except: pass
+                # Generic pattern: delete all keys containing the account's unique identifier
+                # For Azure it's sub_id, for AWS it's account_id
+                uid = c.get('subscription_id') or c.get('aws_account_id') or c.get('project_id')
+                if uid:
+                    cache_service.delete_pattern(f"*{uid}*")
+                else:
+                    # Fallback to provider-specific keys if UID not found in standard fields
+                    cache_service.delete(f"{acc.provider}_spend_{acc.id}")
+            except Exception as e:
+                logger.warning(f"Failed to purge cache for account {acc.id}: {e}")
     
     
     providers_cost = {}
@@ -146,13 +151,13 @@ def get_billing_trends(days: int = 7, refresh: bool = False, current_user: User 
         return []
 
     if refresh:
+        from app.core.crypto import decrypt_credentials
         for acc in accounts:
-            from app.core.crypto import decrypt_credentials
             try:
                 c = decrypt_credentials(acc.encrypted_credentials)
-                sub_id = c.get('subscription_id')
-                if sub_id:
-                    cache_service.delete(f"azure_trends_{sub_id}_{days}")
+                uid = c.get('subscription_id') or c.get('aws_account_id')
+                if uid:
+                    cache_service.delete_pattern(f"*{uid}*")
             except: pass
 
     from app.api.adapters import get_adapter
@@ -200,6 +205,33 @@ def get_billing_trends(days: int = 7, refresh: bool = False, current_user: User 
                 item[p] = 0.0
 
     return result
+
+@router.get("/forecast")
+def get_billing_forecast(days: int = 30, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    """Fetch backend-driven burn-up and predictive forecast telemetry."""
+    # Re-fetch trends without date formatting for better forecasting
+    if current_user.project_id:
+        accounts = db.query(CloudAccount).filter(CloudAccount.project_id == current_user.project_id).all()
+    else:
+        accounts = db.query(CloudAccount).filter(CloudAccount.user_id == current_user.id).all()
+    
+    from app.api.adapters import get_adapter
+    master_trends = {}
+    for acc in accounts:
+        adapter = get_adapter(acc.provider)
+        if not adapter: continue
+        try:
+            provider_trends = adapter.get_daily_costs(days=days, account=acc)
+            for entry in provider_trends:
+                dt = entry['date']
+                if dt not in master_trends: master_trends[dt] = {"date": dt}
+                master_trends[dt][acc.provider] = master_trends[dt].get(acc.provider, 0) + entry.get(acc.provider, 0)
+        except: pass
+
+    raw_trends = list(master_trends.values())
+    raw_trends.sort(key=lambda x: x['date'])
+    
+    return forecast_service.calculate_burn_up(raw_trends)
 @router.get("/history")
 def get_monthly_history(months: int = 6, refresh: bool = False, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
     """Fetch monthly cost history aggregated across ALL cloud providers."""

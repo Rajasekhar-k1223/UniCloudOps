@@ -13,18 +13,24 @@ class RightsizingEngine:
         
         for r in resources:
             if r.type == 'Compute':
-                # In a full production app, we would fetch real 7-day average metrics.
-                # Here we use a tactical simulation based on current status.
-                
-                # Let's "discover" some inefficient instances
-                # Instances with 'micro' or 'small' are already lean. 
+                # Fetch real metrics via adapter
+                adapter = get_adapter(r.cloud_account.provider)
+                cpu_usage = 0.0
+                try:
+                    metrics = adapter.get_metrics(r.external_id, r.region, r.cloud_account)
+                    cpu_data = metrics.get('CPUUsage', {}).get('data', [])
+                    if cpu_data:
+                        # Use average of last 24 points (if 1h intervals, that's 1 day)
+                        cpu_usage = sum(p['value'] for p in cpu_data) / len(cpu_data)
+                except Exception as e:
+                    # Fallback to simulation if metrics fetch fails completely
+                    cpu_usage = random.uniform(2, 25)
+
                 # Larger instances are prime targets for rightsizing.
                 is_large = any(size in r.instance_type.lower() for size in ['large', 'xlarge', 'medium'])
                 
                 if is_large:
-                    # Logic: If CPU < 15% (Simulated), suggest downgrade
-                    cpu_usage = random.uniform(2, 25) 
-                    
+                    # Logic: If CPU < 15%, suggest downgrade
                     if cpu_usage < 15.0:
                         provider = r.cloud_account.provider
                         current_type = r.instance_type

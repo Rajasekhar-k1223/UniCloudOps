@@ -11,10 +11,28 @@ const Billing = () => {
   const [recommendations, setRecommendations] = useState([]);
   const [trends, setTrends] = useState([]);
   const [history, setHistory] = useState([]);
+  const [forecast, setForecast] = useState([]);
   const [loading, setLoading] = useState(true);
   const [projectSummary, setProjectSummary] = useState(null);
 
   const processedTrends = React.useMemo(() => {
+    // If backend provided a full forecast series, use it
+    if (forecast && forecast.length > 0) {
+      return forecast.map(item => {
+        // Format dates for UI consistency (MMM DD)
+        try {
+          const d = new Date(item.date);
+          return {
+            ...item,
+            date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+          };
+        } catch (e) {
+          return item;
+        }
+      });
+    }
+
+    // Fallback to manual calculation if forecast API fails
     let cumulativeSum = 0;
     const data = [...trends].map(t => {
       const dailySum = Object.keys(t).reduce((sum, key) => key !== 'date' ? sum + t[key] : sum, 0);
@@ -30,28 +48,30 @@ const Billing = () => {
         const fDate = new Date(lastPoint.date);
         fDate.setDate(fDate.getDate() + i);
         data.push({
-          date: fDate.toISOString().split('T')[0],
+          date: fDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
           forecast: cumulativeSum + (avgDaily * i),
           isForecast: true
         });
       }
     }
     return data;
-  }, [trends]);
+  }, [trends, forecast]);
 
   useEffect(() => {
     const fetchBillingData = async () => {
       try {
-        const [trendsRes, historyRes, summaryRes, recsRes] = await Promise.all([
+        const [trendsRes, historyRes, summaryRes, recsRes, forecastRes] = await Promise.all([
           api.get('/billing/trends?days=30'),
           api.get('/billing/history?months=6'),
           user?.project_id ? api.get(`/projects/${user.project_id}/summary`) : Promise.resolve({ data: null }),
-          api.get('/billing/recommendations')
+          api.get('/billing/recommendations'),
+          api.get('/billing/forecast?days=30')
         ]);
         setTrends(trendsRes.data);
         setHistory(historyRes.data);
         setProjectSummary(summaryRes.data);
         setRecommendations(recsRes.data);
+        setForecast(forecastRes.data);
       } catch (err) {
         console.error(err);
       } finally {
@@ -64,14 +84,16 @@ const Billing = () => {
   const refreshData = async () => {
     setLoading(true);
     try {
-      const [trendsRes, historyRes, recsRes] = await Promise.all([
+      const [trendsRes, historyRes, recsRes, forecastRes] = await Promise.all([
         api.get('/billing/trends?days=30&refresh=true'),
         api.get('/billing/history?months=6&refresh=true'),
-        api.get('/billing/recommendations')
+        api.get('/billing/recommendations'),
+        api.get('/billing/forecast?days=30&refresh=true')
       ]);
       setTrends(trendsRes.data);
       setHistory(historyRes.data);
       setRecommendations(recsRes.data);
+      setForecast(forecastRes.data);
     } catch (err) {
       console.error(err);
     } finally {

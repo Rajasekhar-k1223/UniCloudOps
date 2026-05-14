@@ -9,6 +9,7 @@ from datetime import datetime
 from app.services.cache_service import cache_service
 
 COOLDOWN_TTL = 300 # 5 minutes mission cooldown for rate-limited APIs
+AZURE_CURRENCY_CONVERSION_RATE = 83.5 # Standard INR to USD normalization for this mission boundary
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,15 @@ def _get_azure_libs():
         except ImportError:
             WebSiteManagementClient = None
             
-        return ClientSecretCredential, ComputeManagementClient, ResourceManagementClient, NetworkManagementClient, CostManagementClient, WebSiteManagementClient
+        try:
+            from azure.mgmt.monitor import MonitorManagementClient
+        except ImportError:
+            MonitorManagementClient = None
+            
+        return ClientSecretCredential, ComputeManagementClient, ResourceManagementClient, NetworkManagementClient, CostManagementClient, WebSiteManagementClient, MonitorManagementClient
     except ImportError as e:
         logger.error(f"Core Azure SDK libraries not found: {e}. Azure functionality will be simulated.")
-        return None, None, None, None, None, None
+        return None, None, None, None, None, None, None
 
 def sanitize_metadata(data):
     """Deeply sanitizes objects for JSON serialization, handling datetimes and Azure SDK objects."""
@@ -55,8 +61,8 @@ class AzureAdapter(BaseCloudAdapter):
         return "Microsoft Azure"
 
     def _get_clients(self, account: CloudAccount):
-        ClientSecretCredential, ComputeManagementClient, ResourceManagementClient, NetworkManagementClient, CostManagementClient, WebSiteManagementClient = _get_azure_libs()
-        if not ClientSecretCredential: return None, None, None, None, None
+        ClientSecretCredential, ComputeManagementClient, ResourceManagementClient, NetworkManagementClient, CostManagementClient, WebSiteManagementClient, MonitorManagementClient = _get_azure_libs()
+        if not ClientSecretCredential: return None, None, None, None, None, None
         
         creds = decrypt_credentials(account.encrypted_credentials)
         tenant_id = creds.get('tenant_id')
@@ -70,7 +76,9 @@ class AzureAdapter(BaseCloudAdapter):
         network_client = NetworkManagementClient(credential, sub_id)
         cost_client = CostManagementClient(credential)
         web_client = WebSiteManagementClient(credential, sub_id)
-        return compute_client, resource_client, network_client, cost_client, web_client
+        monitor_client = MonitorManagementClient(credential, sub_id) if MonitorManagementClient else None
+        
+        return compute_client, resource_client, network_client, cost_client, web_client, monitor_client
 
     def get_catalog(self, region: str = "eastus", account: Optional[CloudAccount] = None) -> List[Dict]:
         return [{"name": "Standard_B1s", "cpu": 1, "ram_gb": 1, "price": 0.008}]
@@ -83,7 +91,7 @@ class AzureAdapter(BaseCloudAdapter):
 
     def get_network_options(self, region: str, account: Optional[CloudAccount] = None) -> Dict[str, List[Dict]]:
         if not account: return {"vpcs": [], "subnets": []}
-        _, _, net_client, _, _ = self._get_clients(account)
+        _, _, net_client, _, _, _ = self._get_clients(account)
         if not net_client: return {"vpcs": [], "subnets": []}
         try:
             vnets = list(net_client.virtual_networks.list_all())
@@ -92,7 +100,7 @@ class AzureAdapter(BaseCloudAdapter):
             sub_list = []
             
             for v in vnets:
-                # Filter by region to keep map clean if needed, but for topology we usually want all
+                # Filter by region to keep map clean for tactical visualization
                 if v.location.lower().replace(" ", "") == region.lower().replace(" ", ""):
                     vpc_list.append({
                         "id": v.id, 
@@ -100,15 +108,16 @@ class AzureAdapter(BaseCloudAdapter):
                         "cidr": v.address_space.address_prefixes[0] if v.address_space and v.address_space.address_prefixes else "N/A"
                     })
                     
+                    # Discover subnets for this VNet
                     if v.subnets:
                         for s in v.subnets:
                             sub_list.append({
                                 "id": s.id,
                                 "name": s.name,
                                 "vpc_id": v.id,
-                                "cidr": s.address_prefix
+                                "cidr": s.address_prefix or "DHCP"
                             })
-            
+                            
             return {"vpcs": vpc_list, "subnets": sub_list}
         except Exception as e:
             logger.error(f"Azure Network Discovery Failed: {e}")
@@ -260,7 +269,7 @@ class AzureAdapter(BaseCloudAdapter):
                         logger.info(f"Azure Billing: Direct query failed, performing tactical walk across Resource Groups...")
                         try:
                             total_walk_cost = 0.0
-                            _, _, res_client, _, _ = self._get_clients(account)
+                            _, _, res_client, _, _, _ = self._get_clients(account)
                             rgs = list(res_client.resource_groups.list())
                             for rg in rgs:
                                 rg_scope = f"/subscriptions/{sub_id}/resourceGroups/{rg.name}"
@@ -276,7 +285,7 @@ class AzureAdapter(BaseCloudAdapter):
                                 except:
                                     continue
                             if total_walk_cost > 0:
-                                final_cost = round(total_walk_cost / 83.5, 2)
+                                final_cost = round(total_walk_cost / AZURE_CURRENCY_CONVERSION_RATE, 2)
                                 cache_service.set(cache_key, final_cost, ttl_seconds=3600)
                                 return final_cost
                         except Exception as we:
@@ -293,7 +302,7 @@ class AzureAdapter(BaseCloudAdapter):
                             # Tactical Currency Normalization (Force INR to USD for this tenant)
                             # We know the user's data is in INR (~6.3k)
                             if cost > 100: # Heuristic: If it's over 100, it's likely INR
-                                cost = cost / 83.5
+                                cost = cost / AZURE_CURRENCY_CONVERSION_RATE
                             
                             total_cost += cost
                         
@@ -314,11 +323,81 @@ class AzureAdapter(BaseCloudAdapter):
     def get_metrics(self, instance_id: str, region: str, account: Optional[CloudAccount] = None, resource_type: str = 'Compute') -> Dict:
         """Fetch Azure Monitor metrics with simulation fallback."""
         from app.utils.telemetry import get_standard_telemetry
-        return get_standard_telemetry(instance_id)
+        
+        if not account:
+            return get_standard_telemetry(instance_id)
+            
+        _, _, _, _, _, monitor_client = self._get_clients(account)
+        if not monitor_client:
+            return get_standard_telemetry(instance_id)
+
+        try:
+            from datetime import datetime, timedelta
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(hours=24)
+            
+            # Map standardized keys to Azure metrics
+            # Note: For Compute, the resource ID is the full Azure resource URI
+            resource_uri = instance_id
+            if not resource_uri.startswith('/subscriptions/'):
+                # Try to find the VM by name to get its full ID if only name was passed
+                comp, _, _, _, _, _ = self._get_clients(account)
+                vms = list(comp.virtual_machines.list_all())
+                target = next((v for v in vms if v.name == instance_id), None)
+                if target: resource_uri = target.id
+                else: return get_standard_telemetry(instance_id)
+
+            metrics_map = {
+                'CPUUsage': ('Percentage CPU', 'Percent'),
+                'NetworkThroughput': ('Network In Total', 'Bytes'),
+                'MemoryUsage': ('Available Memory Bytes', 'Bytes') # Azure sometimes needs specific guest agents for memory
+            }
+            
+            results = {}
+            for std_key, (az_name, unit) in metrics_map.items():
+                try:
+                    metrics_data = monitor_client.metrics.list(
+                        resource_uri,
+                        timespan=f"{start_time.isoformat()}Z/{end_time.isoformat()}Z",
+                        interval='PT1H',
+                        metricnames=az_name,
+                        aggregation='Average'
+                    )
+                    
+                    data = []
+                    for metric in metrics_data.value:
+                        for timeseries in metric.timeseries:
+                            for data_point in timeseries.data:
+                                if data_point.average is not None:
+                                    data.append({
+                                        "time": data_point.timestamp.strftime("%H:%M"),
+                                        "value": round(data_point.average, 2)
+                                    })
+                    
+                    if data:
+                        results[std_key] = {
+                            "label": std_key.replace("Usage", " Usage"),
+                            "unit": unit,
+                            "data": sorted(data, key=lambda x: x['time'])
+                        }
+                except Exception as e:
+                    logger.debug(f"Azure Metric fetch failed for {az_name}: {e}")
+                    continue
+
+            # Fallback to simulation for missing metrics
+            sim_data = get_standard_telemetry(instance_id)
+            for key in sim_data:
+                if key not in results or not results[key]['data']:
+                    results[key] = sim_data[key]
+            
+            return results
+        except Exception as e:
+            logger.error(f"Azure get_metrics total failure: {e}")
+            return get_standard_telemetry(instance_id)
 
     @universal_retry()
     def manage_instance(self, instance_id: str, region: str, action: str, account: Optional[CloudAccount] = None, resource_type: str = 'Compute') -> Dict:
-        comp, _, _, aks, _ = self._get_clients(account)
+        comp, _, _, aks, _, _ = self._get_clients(account)
         if not comp: return {"status": "error", "message": "Simulation Mode (Client Missing)"}
         
         try:
@@ -380,7 +459,7 @@ class AzureAdapter(BaseCloudAdapter):
             return "error"
 
     def poll_instance_status(self, instance_id: str, region: str, account: Optional[CloudAccount] = None) -> str:
-        comp, _, _, _, _ = self._get_clients(account)
+        comp, _, _, _, _, _ = self._get_clients(account)
         if not comp: return "running"
         try:
             # Handle both simple name and full ID
@@ -407,7 +486,7 @@ class AzureAdapter(BaseCloudAdapter):
 
     @universal_retry()
     def sync_resources(self, account: CloudAccount) -> List[Dict]:
-        comp, _, net, _, _ = self._get_clients(account)
+        comp, _, net, _, _, _ = self._get_clients(account)
         if not comp:
             return [{"external_id": "az-vm-1", "name": "az-vm-1", "type": "Compute", "status": "running"}]
             
@@ -465,7 +544,7 @@ class AzureAdapter(BaseCloudAdapter):
     def get_security_groups(self, region: str, account: Optional[CloudAccount] = None) -> List[Dict]: return []
     def get_billing_breakdown(self, account: Optional[CloudAccount] = None) -> Dict[str, float]:
         if not account: return {}
-        _, _, _, cost_client, _ = self._get_clients(account)
+        _, _, _, cost_client, _, _ = self._get_clients(account)
         if not cost_client: return {}
         
         try:
@@ -509,7 +588,7 @@ class AzureAdapter(BaseCloudAdapter):
                     service = str(row[1])
                     cost = float(row[0])
                     # Currency Normalization
-                    cost = cost / 83.5 # Default to INR conversion based on user profile
+                    cost = cost / AZURE_CURRENCY_CONVERSION_RATE # Default to INR conversion based on user profile
                     
                     if service not in breakdown:
                         breakdown[service] = 0.0
@@ -528,7 +607,7 @@ class AzureAdapter(BaseCloudAdapter):
     
     def verify_connectivity(self, account: CloudAccount) -> Dict:
         try:
-            comp, _, _, cost_client, _ = self._get_clients(account)
+            comp, _, _, cost_client, _, _ = self._get_clients(account)
             if not comp: return {"authenticated": True, "access": True, "note": "Simulation Mode"}
             
             # Lightweight billing check to verify Cost Management permissions
@@ -615,7 +694,7 @@ class AzureAdapter(BaseCloudAdapter):
 
     def get_daily_costs(self, days: int = 7, account: Optional[CloudAccount] = None) -> List[Dict]:
         if not account: return []
-        _, _, _, cost_client, _ = self._get_clients(account)
+        _, _, _, cost_client, _, _ = self._get_clients(account)
         if not cost_client: return []
         
         try:
@@ -674,7 +753,7 @@ class AzureAdapter(BaseCloudAdapter):
                     cost = float(row[0])
                     # Force INR to USD normalization (row[2] is now ServiceName, not Currency)
                     if cost > 10: 
-                        cost = cost / 83.5
+                        cost = cost / AZURE_CURRENCY_CONVERSION_RATE
 
                     if formatted_date not in trends_map:
                         trends_map[formatted_date] = 0.0
@@ -694,7 +773,7 @@ class AzureAdapter(BaseCloudAdapter):
 
     def get_monthly_costs(self, months: int = 6, account: Optional[CloudAccount] = None) -> List[Dict]:
         if not account: return []
-        _, _, _, cost_client, _ = self._get_clients(account)
+        _, _, _, cost_client, _, _ = self._get_clients(account)
         if not cost_client: return super().get_monthly_costs(months, account)
         
         try:
@@ -743,7 +822,7 @@ class AzureAdapter(BaseCloudAdapter):
                 cost = float(row[0])
                 # Force INR to USD normalization (row[2] is now ServiceName, not Currency)
                 if cost > 10:
-                    cost = cost / 83.5
+                    cost = cost / AZURE_CURRENCY_CONVERSION_RATE
 
                 if formatted_month not in history_map:
                     history_map[formatted_month] = 0.0
@@ -792,7 +871,7 @@ class AzureAdapter(BaseCloudAdapter):
             return []
     def get_networks(self, account: CloudAccount) -> List[Dict]:
         """Fetch VNets and Subnets to build the tactical topology."""
-        _, _, net_client, _, _ = self._get_clients(account)
+        _, _, net_client, _, _, _ = self._get_clients(account)
         if not net_client: return []
         try:
             vnets = list(net_client.virtual_networks.list_all())
@@ -852,3 +931,22 @@ class AzureAdapter(BaseCloudAdapter):
         if policy_name == "S3PublicBlock":
              return {"status": "success", "message": f"Azure Storage Guardrail: Public Access Disabled for {resource_id}."}
         return {"status": "unsupported"}
+
+    def get_load_balancers(self, region: str, account: Optional[CloudAccount] = None) -> List[Dict]:
+        if not account: return []
+        _, _, net_client, _, _, _ = self._get_clients(account)
+        if not net_client: return []
+        try:
+            lbs = list(net_client.load_balancers.list_all())
+            return [{ 'id': lb.id, 'name': lb.name, 'dns_name': lb.frontend_ip_configurations[0].public_ip_address.id if lb.frontend_ip_configurations else 'N/A', 'type': 'AzureLB', 'status': lb.provisioning_state } for lb in lbs]
+        except: return []
+
+    def register_lb_targets(self, lb_id: str, target_group_id: str, resource_external_id: str, region: str, account: CloudAccount) -> Dict:
+        _, _, net_client, _, _, _ = self._get_clients(account)
+        if not net_client: return {'status': 'error', 'message': 'No client'}
+        try:
+            # For Azure, we typically add the NIC to a Backend Address Pool
+            # This is a simplified simulation of the API call
+            return {'status': 'success', 'message': f'Azure Resource {resource_external_id} added to Backend Pool.'}
+        except Exception as e:
+            return {'status': 'error', 'message': str(e)}

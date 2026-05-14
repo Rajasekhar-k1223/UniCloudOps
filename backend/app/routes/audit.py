@@ -13,33 +13,42 @@ def get_audit_logs(
     limit: int = 50,
     offset: int = 0,
     action: Optional[str] = None,
+    include_provider: bool = True,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_viewer)
 ):
-    """Fetch a tactical forensic audit feed of all platform operations."""
-    query = db.query(AuditLog)
+    """Fetch a tactical forensic audit feed merging platform and provider operations."""
+    from app.services.audit_aggregator import audit_aggregator
     
+    query = db.query(AuditLog)
     if action:
         query = query.filter(AuditLog.action == action)
         
-    # Order by newest first
     logs = query.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset).all()
-    total = query.count()
+    
+    unified_feed = [
+        {
+            "id": f"PLAT-{l.id}",
+            "user_email": l.user.email if l.user else "System",
+            "action": l.action,
+            "resource_type": l.resource_type,
+            "status": l.status,
+            "message": l.message,
+            "ip_address": l.ip_address,
+            "timestamp": l.created_at,
+            "provider": "UniOS"
+        } for l in logs
+    ]
+    
+    if include_provider:
+        provider_events = audit_aggregator.get_provider_events(db, current_user.id, limit=limit)
+        unified_feed.extend(provider_events)
+        # Sort by timestamp descending
+        unified_feed = sorted(unified_feed, key=lambda x: str(x['timestamp']), reverse=True)[:limit]
     
     return {
-        "total": total,
-        "logs": [
-            {
-                "id": l.id,
-                "user_email": l.user.email if l.user else "System",
-                "action": l.action,
-                "resource_type": l.resource_type,
-                "status": l.status,
-                "message": l.message,
-                "ip_address": l.ip_address,
-                "created_at": l.created_at
-            } for l in logs
-        ]
+        "total": len(unified_feed),
+        "logs": unified_feed
     }
 
 @router.get("/sealed/{project_id}")

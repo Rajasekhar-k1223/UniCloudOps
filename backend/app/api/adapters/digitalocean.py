@@ -206,7 +206,44 @@ class DigitalOceanAdapter(BaseCloudAdapter):
             return {"status": "error", "message": str(e)}
 
     def sync_resources(self, account: CloudAccount) -> List[Dict]:
-        return [{"external_id": "888111", "name": "prod-web", "type": "Compute", "status": "active"}]
+        """Fetch real Droplets from DigitalOcean."""
+        import requests
+        from app.core.crypto import decrypt_credentials
+        try:
+            creds = decrypt_credentials(account.encrypted_credentials)
+            token = creds.get('do_token')
+            res = requests.get(
+                "https://api.digitalocean.com/v2/droplets",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10.0
+            )
+            res.raise_for_status()
+            droplets = res.json().get('droplets', [])
+            
+            discovered = []
+            for d in droplets:
+                # Extract IP
+                ip = "N/A"
+                if d.get('networks', {}).get('v4'):
+                    for net in d['networks']['v4']:
+                        if net['type'] == 'public':
+                            ip = net['ip_address']
+                            break
+
+                discovered.append({
+                    "external_id": str(d['id']),
+                    "name": d['name'],
+                    "type": "Compute",
+                    "instance_type": d['size_slug'],
+                    "region": d['region']['slug'],
+                    "status": d['status'],
+                    "public_ip": ip,
+                    "cloud_metadata": d
+                })
+            return discovered
+        except Exception as e:
+            logger.error(f"DigitalOcean Sync Failed: {e}")
+            return []
 
     def get_clusters(self, account: CloudAccount) -> List[Dict]: return []
     def get_functions(self, account: CloudAccount) -> List[Dict]: return []

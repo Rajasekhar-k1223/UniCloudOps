@@ -1,106 +1,85 @@
+import os
 import logging
+import google.generativeai as genai
 from sqlalchemy.orm import Session
-from typing import List, Dict, Optional
-from app.models.resource import Resource
-from app.models.compliance import ComplianceResult
-from app.models.cloud_account import CloudAccount
+from typing import Dict, List
+from app.models.project import Project
+from app.services.security_service import security_service
+from app.services.forecast_service import forecast_service
 
 logger = logging.getLogger(__name__)
 
 class IntelligenceService:
     def __init__(self):
-        # Tactical intent mappings
-        self.intent_keywords = {
-            "BILLING": ["cost", "spend", "expensive", "bill", "money"],
-            "COMPLIANCE": ["compliance", "failing", "violations", "unsecured", "security"],
-            "INVENTORY": ["resources", "instances", "machines", "running", "active"]
-        }
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if api_key:
+            genai.configure(api_key=api_key)
+            self.model = genai.GenerativeModel('gemini-1.5-flash')
+        else:
+            self.model = None
 
-    def parse_intent(self, query: str) -> str:
-        query_lower = query.lower()
-        for intent, keywords in self.intent_keywords.items():
-            if any(k in query_lower for k in keywords):
-                return intent
-        return "GENERAL"
+    def get_strategic_briefing(self, db: Session, project_id: int) -> Dict:
+        """Synthesize multi-cloud telemetry into an AI-powered tactical briefing."""
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if not project:
+            return {"status": "error", "message": "Project not found"}
 
-    def execute_strategic_query(self, db: Session, user_id: int, query: str) -> Dict:
-        """Parse natural language query and return tactical insights."""
-        intent = self.parse_intent(query)
-        
-        if intent == "COMPLIANCE":
-            # Search for failing compliance results
-            results = db.query(ComplianceResult).join(Resource).filter(
-                Resource.user_id == user_id,
-                ComplianceResult.status == 'fail'
-            ).all()
+        # 1. Gather Telemetry Context
+        try:
+            threats = security_service.get_aggregated_threats(db, project_id)
+            forecast = forecast_service.get_project_forecast(db, project_id)
             
-            summary = f"Detected {len(results)} active compliance violations across your mission boundary."
-            data = [{"resource": r.resource.name, "check": r.check_id, "message": r.message} for r in results[:5]]
+            # 2. Build the Prompt
+            prompt = f"""
+            You are 'Sovereign-AI', the strategic advisor for the UniCloudOps multi-cloud command center.
+            Analyze the following telemetry for project '{project.name}' and provide a concise 'Commander's Briefing'.
+            
+            PROJECT CONTEXT:
+            - Budget: ${project.budget_limit}
+            - Current Spend: ${project.current_spend_mtd}
+            - Forecast (7-day): {forecast.get('forecast_7d', 'N/A')}
+            
+            SECURITY CONTEXT:
+            - Active Threats: {len(threats)}
+            - Threat Summary: {[t['message'] for t in threats[:3]]}
+            
+            GOAL:
+            Provide 3 tactical recommendations in a professional, mission-oriented tone. 
+            Format: Markdown with 'Briefing', 'Threat Assessment', and 'Strategic Recommendations'.
+            """
+            
+            if not self.model:
+                return self._get_simulated_briefing(project, threats, forecast)
+
+            # 3. Call Gemini
+            response = self.model.generate_content(prompt)
             return {
-                "answer": summary,
-                "data": data,
-                "type": "compliance_alert"
+                "status": "success",
+                "briefing": response.text,
+                "model": "gemini-1.5-flash"
             }
-            
-        elif intent == "BILLING":
-            # Just a placeholder for actual billing aggregation
-            total_est = db.query(Resource).filter(Resource.user_id == user_id).all()
-            total_cost = sum(r.estimated_monthly_cost for r in total_est if r.estimated_monthly_cost)
-            
-            return {
-                "answer": f"Your current estimated multi-cloud footprint is tracking at {total_cost:.2f} credits per month.",
-                "data": {"total_cost": total_cost},
-                "type": "billing_insight"
-            }
-            
-        elif intent == "INVENTORY":
-            running = db.query(Resource).filter(Resource.user_id == user_id, Resource.status == 'running').count()
-            return {
-                "answer": f"You currently have {running} active compute missions operational across the global grid.",
-                "type": "inventory_summary"
-            }
-            
+        except Exception as e:
+            logger.error(f"AI Strategic Synthesis failed: {e}")
+            return self._get_simulated_briefing(project, [], {})
+
+    def _get_simulated_briefing(self, project, threats, forecast) -> Dict:
+        """Fallback briefing if Gemini is unavailable."""
         return {
-            "answer": "I am standing by. You can ask about your costs, compliance status, or resource inventory.",
-            "type": "general_info"
-        }
+            "status": "simulated",
+            "briefing": f"""
+### 🛡️ Sovereign Briefing: {project.name}
 
-    def predictive_scaling_analyzer(self, db: Session, user_id: int) -> List[Dict]:
-        """Proactively analyze mission boundary for potential bottlenecks."""
-        # Simulation: In production we'd analyze time-series metrics
-        resources = db.query(Resource).filter(Resource.user_id == user_id, Resource.status == 'running').all()
-        predictions = []
-        
-        for r in resources:
-            if random.random() > 0.8: # 20% chance for simulation
-                predictions.append({
-                    "resource_id": r.id,
-                    "name": r.name,
-                    "provider": r.provider,
-                    "issue": "Egress Traffic Spike Detected",
-                    "suggestion": "Scale Cluster by 2 Nodes",
-                    "estimated_impact": "+$15.00/mo"
-                })
-        return predictions
+**Status**: Operational Over-watch Active.
 
-    def sentinel_remediation_evolve(self, db: Session, violation_id: int) -> Dict:
-        """🛡️ Phase 32: Sentinel Apex - Self-Evolving Remediation 🛡️"""
-        # In a real system, this would use an LLM (OpenAI/Gemini) to generate a Python script
-        # that calls provider APIs to fix the specific check_id failure.
-        
-        canned_scripts = [
-            "def remediate_sg(provider, sg_id):\n    # Generated by Sentinel-01\n    adapter = get_adapter(provider)\n    adapter.close_port(sg_id, 22)\n    return True",
-            "def fix_bucket_acl(provider, bucket_name):\n    # Generated by Sentinel-02\n    adapter = get_adapter(provider)\n    adapter.make_private(bucket_name)\n    return True"
-        ]
-        
-        evolved_code = random.choice(canned_scripts)
-        
-        return {
-            "status": "success",
-            "generation_id": f"EVOLVE-SEQ-{random.randint(1000, 9999)}",
-            "logic_source": evolved_code,
-            "confidence": 0.98,
-            "is_self_improved": True
+**Threat Assessment**: 
+{len(threats)} active security signals detected. Priority: {'CRITICAL' if len(threats) > 0 else 'LOW'}.
+
+**Strategic Recommendations**:
+1. **Fiscal Guardrail**: Forecast shows you will hit {forecast.get('trajectory', 'normal')} spending levels. Recommend rightsizing idle nodes.
+2. **Security Posture**: {len(threats)} findings require immediate remediation in your AWS/Azure environments.
+3. **Mission Stability**: All VPC/Subnet tunnels are active.
+            """,
+            "model": "Tactical-Simulation-v1"
         }
 
 intelligence_service = IntelligenceService()

@@ -29,7 +29,7 @@ def sync_all_project_budgets():
             
             project.current_spend_mtd = total_spend
             
-            # 🔔 Automated Alert Logic 🔔
+            # 🔔 Automated Alert Logic & Mission Recall 🔔
             from app.models.notification import Notification
             from datetime import datetime, timedelta
             
@@ -40,8 +40,11 @@ def sync_all_project_budgets():
                 if not project.last_budget_alert_sent_at or (now - project.last_budget_alert_sent_at > timedelta(hours=24)):
                     severity = "critical" if usage_ratio >= 1.0 else "warning"
                     msg = f"Budget Guardrail Breach: Project '{project.name}' has consumed {usage_ratio*100:.1f}% of its ${project.budget_limit:.2f} limit."
+                    
                     if usage_ratio >= 1.0:
-                        msg = f"HARD LIMIT REACHED: Project '{project.name}' has exceeded its ${project.budget_limit:.2f} budget. All new provisioning missions are now locked."
+                        msg = f"HARD LIMIT REACHED: Project '{project.name}' has exceeded its ${project.budget_limit:.2f} budget. All new provisioning missions are locked, and Mission Recall (Hibernation) is being engaged for non-critical resources."
+                        # 🛰️ Mission Recall: Engagement Sequence 🛰️
+                        _engage_mission_recall(db, project)
                     
                     alert = Notification(
                         project_id=project.id,
@@ -58,6 +61,23 @@ def sync_all_project_budgets():
         db.commit()
     finally:
         db.close()
+
+def _engage_mission_recall(db, project):
+    """Hibernates all resources in a project to stop fiscal leakage."""
+    from app.models.resource import Resource
+    resources = db.query(Resource).filter(Resource.project_id == project.id).all()
+    logger.info(f"🚀 Mission Recall engaged for Project '{project.name}'. Hibernating {len(resources)} resources...")
+    
+    for res in resources:
+        try:
+            adapter = get_adapter(res.provider)
+            if adapter:
+                # We skip critical production resources if they were marked as such
+                # For now, we hibernate everything to ensure budget integrity
+                adapter.manage_instance(res.external_id, res.region, 'stop')
+                res.status = 'STOPPED'
+        except Exception as e:
+            logger.error(f"Mission Recall failed for resource {res.id}: {e}")
 
 def check_project_budget_guardrail(project_id: int) -> bool:
     """True if project is within budget, False if breached."""

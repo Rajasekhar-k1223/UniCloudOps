@@ -61,7 +61,48 @@ class GCPAdapter(BaseCloudAdapter):
         return [{"name": "e2-micro", "cpu": 2, "ram_gb": 1, "price": 0.012}]
     def get_price(self, instance_type: str, region: str = "us-central1", account: Optional[CloudAccount] = None) -> Optional[float]: return 0.012
     def get_regions(self, account: Optional[CloudAccount] = None) -> List[Dict]: return [{"id": "us-central1", "name": "Iowa"}]
-    def get_network_options(self, region: str, account: Optional[CloudAccount] = None) -> Dict[str, List[Dict]]: return {"vpcs": [], "subnets": []}
+    def get_network_options(self, region: str, account: Optional[CloudAccount] = None) -> Dict[str, List[Dict]]:
+        """Fetch real VPCs and Subnets from the GCP project."""
+        if not account: return {"vpcs": [], "subnets": []}
+        compute_v1, _, _ = _get_gcp_libs()
+        if not compute_v1: return {"vpcs": [], "subnets": []}
+        
+        try:
+            creds = decrypt_credentials(account.encrypted_credentials)
+            project_id = creds.get('project_id')
+            
+            # Networks (VPCs)
+            net_client = compute_v1.NetworksClient.from_service_account_info(creds)
+            networks = list(net_client.list(project=project_id))
+            
+            vpcs = []
+            for n in networks:
+                vpcs.append({
+                    "id": n.self_link,
+                    "name": n.name,
+                    "cidr": n.i_pv4_range if hasattr(n, 'i_pv4_range') else "Custom"
+                })
+                
+            # Subnetworks
+            sub_client = compute_v1.SubnetworksClient.from_service_account_info(creds)
+            # Filter by region if specified, or list all
+            subnets = []
+            if region:
+                try:
+                    subs = sub_client.list(project=project_id, region=region)
+                    for s in subs:
+                        subnets.append({
+                            "id": s.self_link,
+                            "name": s.name,
+                            "vpc_id": s.network,
+                            "cidr": s.ip_cidr_range
+                        })
+                except: pass
+            
+            return {"vpcs": vpcs, "subnets": subnets}
+        except Exception as e:
+            logger.error(f"GCP Network Discovery Failed: {e}")
+            return {"vpcs": [], "subnets": []}
     def get_images(self, region: str, account: Optional[CloudAccount] = None) -> Dict[str, str]: return {"ubuntu": "projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts"}
     def get_monthly_spend(self, account: Optional[CloudAccount] = None) -> float:
         """Fetch estimated monthly spend for GCP assets."""
@@ -73,6 +114,55 @@ class GCPAdapter(BaseCloudAdapter):
     def get_metrics(self, instance_id: str, region: str, account: Optional[CloudAccount] = None, resource_type: str = 'Compute') -> Dict:
         """Fetch GCP Cloud Monitoring metrics with simulation fallback."""
         from app.utils.telemetry import get_standard_telemetry
+        if not account: return get_standard_telemetry(instance_id)
+        
+        try:
+            from google.cloud import monitoring_v3
+            creds = decrypt_credentials(account.encrypted_credentials)
+            client = monitoring_v3.MetricServiceClient.from_service_account_info(creds)
+            project_id = creds.get('project_id')
+            
+            from datetime import datetime, timedelta
+            now = datetime.utcnow()
+            start_time = now - timedelta(hours=24)
+            
+            # Metric types for GCP
+            # CPU: compute.googleapis.com/instance/cpu/utilization
+            metric_type = "compute.googleapis.com/instance/cpu/utilization"
+            
+            interval = monitoring_v3.TimeInterval({
+                "end_time": {"seconds": int(now.timestamp())},
+                "start_time": {"seconds": int(start_time.timestamp())}
+            })
+            
+            results = client.list_time_series(
+                name=f"projects/{project_id}",
+                filter=f'metric.type = "{metric_type}" AND metric.labels.instance_name = "{instance_id}"',
+                interval=interval,
+                view=monitoring_v3.ListTimeSeriesRequest.TimeSeriesView.FULL
+            )
+            
+            data = []
+            for ts in results:
+                for point in ts.points:
+                    data.append({
+                        "time": datetime.fromtimestamp(point.interval.start_time.timestamp()).strftime("%H:%M"),
+                        "value": round(point.value.double_value * 100, 2) # GCP utilization is 0-1
+                    })
+            
+            if data:
+                return {
+                    "CPUUsage": {
+                        "label": "CPU Usage",
+                        "unit": "%",
+                        "data": sorted(data, key=lambda x: x['time'])
+                    },
+                    "MemoryUsage": get_standard_telemetry(instance_id)['MemoryUsage'],
+                    "NetworkThroughput": get_standard_telemetry(instance_id)['NetworkThroughput']
+                }
+        except Exception as e:
+            logger.debug(f"GCP Metrics fetch failed: {e}")
+            
         return get_standard_telemetry(instance_id)
     @universal_retry()
     def manage_instance(self, instance_id: str, region: str, action: str, account: Optional[CloudAccount] = None, resource_type: str = 'Compute') -> Dict:
@@ -289,3 +379,15 @@ class GCPAdapter(BaseCloudAdapter):
         if policy_name == "S3PublicBlock":
             return {"status": "success", "message": f"GCP Firewall Guardrails applied: {policy_name}"}
         return {"status": "unsupported"}
+
+    def get_load_balancers(self, region: str, account: Optional[CloudAccount] = None) -> List[Dict]:
+        if not account: return []
+        compute_v1, _, _ = _get_gcp_libs()
+        if not compute_v1: return []
+        try:
+            creds = decrypt_credentials(account.encrypted_credentials)
+            project_id = creds.get('project_id')
+            client = compute_v1.ForwardingRulesClient.from_service_account_info(creds)
+            rules = list(client.list(project=project_id, region=region))
+            return [{ 'id': r.self_link, 'name': r.name, 'dns_name': r.I_p_address, 'type': 'GCP-ForwardingRule', 'status': 'ACTIVE' } for r in rules]
+        except: return []
