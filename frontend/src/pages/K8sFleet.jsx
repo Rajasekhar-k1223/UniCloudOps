@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Layers, Cpu, Database, Activity, Terminal, ExternalLink, RefreshCw, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Box, Layers, Cpu, Database, Activity, Terminal, ExternalLink, RefreshCw, CheckCircle, AlertTriangle, Play, Trash2, Brain, Shield } from 'lucide-react';
 import api from '../services/api';
+import StrategicBriefing from '../components/intelligence/StrategicBriefing';
 
 const K8sFleet = () => {
   const [clusters, setClusters] = useState([]);
@@ -9,6 +10,8 @@ const K8sFleet = () => {
   const [nodes, setNodes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [showBriefing, setShowBriefing] = useState(false);
+  const [actioning, setActioning] = useState(null); // pod uid
 
   useEffect(() => {
     const fetchClusters = async () => {
@@ -29,6 +32,7 @@ const K8sFleet = () => {
   useEffect(() => {
     if (selectedCluster) {
       fetchClusterDetails(selectedCluster.id);
+      setShowBriefing(false);
     }
   }, [selectedCluster]);
 
@@ -48,6 +52,24 @@ const K8sFleet = () => {
     }
   };
 
+  const handleK8sAction = async (podName, namespace, action, uid) => {
+    setActioning(uid);
+    try {
+      await api.post('/k8s/action', {
+        resource_id: selectedCluster.id,
+        resource_name: podName,
+        namespace,
+        action
+      });
+      // Refresh after action
+      setTimeout(() => fetchClusterDetails(selectedCluster.id), 2000);
+    } catch (err) {
+      alert("Mission Failed: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setActioning(null);
+    }
+  };
+
   if (loading) return (
     <div className="flex items-center justify-center h-full">
       <RefreshCw className="animate-spin text-indigo-600 w-8 h-8" />
@@ -61,13 +83,28 @@ const K8sFleet = () => {
           <h1 className="text-2xl font-bold text-gray-900">K8s Fleet Command</h1>
           <p className="text-gray-500">Real-time observability and connectivity for your multi-cloud Kubernetes clusters.</p>
         </div>
-        <button 
-          onClick={() => selectedCluster && fetchClusterDetails(selectedCluster.id)}
-          className="p-2 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition shadow-sm"
-        >
-          <RefreshCw className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="flex gap-3">
+          <button 
+            onClick={() => setShowBriefing(!showBriefing)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl transition shadow-sm font-bold text-xs uppercase tracking-widest ${showBriefing ? 'bg-rose-600 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+          >
+            <Brain size={16} />
+            {showBriefing ? 'Close Intelligence' : 'Tactical Briefing'}
+          </button>
+          <button 
+            onClick={() => selectedCluster && fetchClusterDetails(selectedCluster.id)}
+            className="p-2 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition shadow-sm"
+          >
+            <RefreshCw className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
+
+      {showBriefing && selectedCluster && (
+        <div className="animate-in slide-in-from-top duration-500">
+          <StrategicBriefing projectId={selectedCluster.project_id} />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Cluster Selector Sidebar */}
@@ -175,7 +212,7 @@ const K8sFleet = () => {
                         <th className="px-6 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Namespace</th>
                         <th className="px-6 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Pod Name</th>
                         <th className="px-6 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Status</th>
-                        <th className="px-6 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Restart Count</th>
+                        <th className="px-6 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
@@ -197,7 +234,26 @@ const K8sFleet = () => {
                               </span>
                             </div>
                           </td>
-                          <td className="px-6 py-4 text-xs font-bold text-gray-500">{p.status.containerStatuses?.[0].restartCount || 0}</td>
+                          <td className="px-6 py-4">
+                            <div className="flex justify-center gap-2">
+                              <button 
+                                onClick={() => handleK8sAction(p.metadata.name, p.metadata.namespace, 'restart', p.metadata.uid)}
+                                disabled={actioning}
+                                className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition shadow-sm disabled:opacity-50"
+                                title="Restart Pod"
+                              >
+                                <Play size={14} className={actioning === p.metadata.uid ? 'animate-spin' : ''} />
+                              </button>
+                              <button 
+                                onClick={() => handleK8sAction(p.metadata.name, p.metadata.namespace, 'delete', p.metadata.uid)}
+                                disabled={actioning}
+                                className="p-1.5 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-600 hover:text-white transition shadow-sm disabled:opacity-50"
+                                title="Force Delete"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

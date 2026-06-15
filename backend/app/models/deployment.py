@@ -18,6 +18,10 @@ class Deployment(Base):
     status = Column(String(50), default="pending") # pending, running, success, failed
     logs = Column(Text, nullable=True) # Full execution output
     
+    # 🕵️ Drift Tracking 🕵️
+    has_drift = Column(Integer, default=0) # 0 = Synced, 1 = Drifted
+    drift_summary = Column(Text, nullable=True)
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

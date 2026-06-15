@@ -2,7 +2,7 @@ import asyncio
 from app.db.session import SessionLocal, engine, Base
 from app.models.template import Template
 from app.models.project import Project
-from app.models import user, cloud_account, deployment, resource
+from app.models import user, cloud_account, deployment, resource, auction, registry, bio_link
 from app.core.config import settings
 import logging
 
@@ -17,6 +17,7 @@ def init_db():
     try:
         from sqlalchemy import text
         with engine.connect() as conn:
+            # 1. Update templates columns
             columns_to_add = {
                 "stack_id": "VARCHAR(255) UNIQUE AFTER id",
                 "icon": "VARCHAR(50) AFTER description",
@@ -34,6 +35,17 @@ def init_db():
                     conn.execute(text(f"ALTER TABLE templates ADD COLUMN {col} {definition}"))
                     if col == "stack_id":
                         conn.execute(text("CREATE INDEX ix_templates_stack_id ON templates (stack_id)"))
+            
+            # 2. Update cloud_accounts columns (Pause/Resume soft deactivation support)
+            columns_to_add_accounts = {
+                "is_active": "BOOLEAN DEFAULT TRUE AFTER name"
+            }
+            for col, definition in columns_to_add_accounts.items():
+                result = conn.execute(text(f"SHOW COLUMNS FROM cloud_accounts LIKE '{col}'"))
+                if not result.fetchone():
+                    logger.info(f"MIGRATION: Adding missing '{col}' column to 'cloud_accounts' table...")
+                    conn.execute(text(f"ALTER TABLE cloud_accounts ADD COLUMN {col} {definition}"))
+            
             conn.commit()
     except Exception as e:
         logger.warning(f"Tactical migration skipped or failed (might already be fixed): {e}")
@@ -356,6 +368,35 @@ resource "azurerm_windows_virtual_machine" "vm" {
 
         db.add_all([t1, t2, t3, t4, t5, t6, t7, t8])
         db.commit()
+
+    # Seed Registry Assets
+    from app.models.registry import RegistryAsset
+    if db.query(RegistryAsset).count() == 0:
+        logger.info("Seeding Registry Assets...")
+        assets = [
+            RegistryAsset(asset_id="ASSET-01", name="Mission-Forge-FastAPI-V1", type="Code", version="1.2.4", signature="0x88f2...", status="verified"),
+            RegistryAsset(asset_id="ASSET-02", name="Sovereign-Edge-K3s-Image", type="Container", version="4.1.0", signature="0x99a1...", status="verified"),
+            RegistryAsset(asset_id="ASSET-03", name="NIST-800-53-Rego-Policy", type="Policy", version="2.0.1", signature="0xbb4d...", status="verified"),
+            RegistryAsset(asset_id="ASSET-04", name="Galactic-Mesh-3D-Blueprint", type="Blueprint", version="0.9.8", signature="0xcc2e...", status="unverified")
+        ]
+        db.add_all(assets)
+        db.commit()
+
+    # Seed BioLink Operator
+    from app.models.bio_link import OperatorBioLink
+    if db.query(OperatorBioLink).count() == 0:
+        logger.info("Seeding BioLink Operator...")
+        operator = OperatorBioLink(
+            operator_id="COMMANDER-ALPHA",
+            cognitive_stability=98.4,
+            command_rhythm="Stable",
+            decision_latency="140ms",
+            stress_marker="Low",
+            lockdown_status="Unlocked"
+        )
+        db.add_all([operator])
+        db.commit()
+
     db.close()
     logger.info("Database initialized successfully.")
 

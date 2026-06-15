@@ -1,0 +1,14 @@
+# Backend Docker ignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.db
+.pytest_cache
+venv
+.env
+data
+data-backup-*
+db-backup
+logs.txt
+logs_utf8.txt

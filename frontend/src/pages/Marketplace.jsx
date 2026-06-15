@@ -1,226 +1,133 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Database, Zap, Terminal, Search, Filter, Rocket, CreditCard, Layers, RefreshCw, CheckCircle } from 'lucide-react';
-import api from '../services/api';
-import { useCurrency } from '../context/CurrencyContext';
+import { apiCall } from '../services/api';
+import { ShoppingBag, Star, Download, Search, CheckCircle, ShieldCheck } from 'lucide-react';
+import apiConfig from '../services/apiConfig';
 
 const Marketplace = () => {
-  const { formatValue } = useCurrency();
-  const [stacks, setStacks] = useState([]);
-  const [accounts, setAccounts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedStack, setSelectedStack] = useState(null);
-  const [targetAccount, setTargetAccount] = useState('');
-  const [deploying, setDeploying] = useState(false);
+    const [items, setItems] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [activeCategory, setActiveCategory] = useState("All");
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [stacksRes, accountsRes] = await Promise.all([
-          api.get('/marketplace/stacks'),
-          api.get('/cloud-accounts')
-        ]);
-        setStacks(stacksRes.data);
-        setAccounts(accountsRes.data);
-      } catch (err) {
-        console.error("Failed to fetch marketplace data:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
+    const categories = ["All", "Deployment Blueprints", "Terraform Templates", "Helm Charts", "Compliance Packs", "AI Agents"];
 
-  const handleDeploy = async () => {
-    if (!targetAccount) return alert('Select target cloud account');
-    
-    // 🧬 Collect Tactical Variables from Wizard 🧬
-    const variables = {
-      cluster_name: document.getElementById('mission_name')?.value,
-      instance_type: document.getElementById('instance_type')?.value,
-      node_count: document.getElementById('node_count')?.value,
-      region: accounts.find(a => a.id == targetAccount)?.provider === 'aws' ? 'us-east-1' : 'East US'
+    const fetchItems = async () => {
+        try {
+            setLoading(true);
+            let url = `${apiConfig.baseURL}/marketplace/items`;
+            const params = new URLSearchParams();
+            if (activeCategory !== "All") params.append("category", activeCategory);
+            if (searchTerm) params.append("search", searchTerm);
+            if (params.toString()) url += `?${params.toString()}`;
+            
+            const data = await apiCall(url);
+            setItems(data);
+        } catch (error) {
+            console.error('Failed to fetch marketplace items', error);
+        } finally {
+            setLoading(false);
+        }
     };
 
-    setDeploying(true);
-    try {
-      const res = await api.post(`/marketplace/deploy/${selectedStack.id}?target_account_id=${targetAccount}`, variables);
-      alert(res.data.message);
-      setSelectedStack(null);
-    } catch (err) {
-      alert('Deployment mission failed: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setDeploying(false);
-    }
-  };
+    useEffect(() => {
+        fetchItems();
+    }, [activeCategory, searchTerm]);
 
-  const getIcon = (iconName) => {
-    switch (iconName) {
-      case 'Box': return <Box className="w-6 h-6" />;
-      case 'Database': return <Database className="w-6 h-6" />;
-      case 'Zap': return <Zap className="w-6 h-6" />;
-      case 'Terminal': return <Terminal className="w-6 h-6" />;
-      default: return <Layers className="w-6 h-6" />;
-    }
-  };
+    const handlePublishClick = () => {
+        alert("Publishing Asset Wizard (Not implemented in MVP view)");
+    };
 
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">App Marketplace</h1>
-          <p className="text-gray-500">Deploy battle-tested infrastructure stacks across multi-cloud mission boundaries.</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {loading ? (
-          <div className="col-span-full py-20 text-center">
-            <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-indigo-600" />
-            <p className="text-gray-400 font-bold uppercase tracking-widest text-xs">Accessing Tactical Catalog...</p>
-          </div>
-        ) : stacks.map((stack) => (
-          <div key={stack.id} className="glass-panel group hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col h-full bg-white border-slate-100">
-             <div className="p-6 flex-1">
-                <div className="flex justify-between items-start mb-6">
-                   <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 text-indigo-600 shadow-inner group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                      {getIcon(stack.icon)}
-                   </div>
-                   <div className="flex flex-col items-end">
-                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${
-                        stack.complexity === 'low' ? 'bg-emerald-100 text-emerald-700' : 
-                        stack.complexity === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
-                      }`}>
-                        {stack.complexity}
-                      </span>
-                      <p className="text-[10px] text-gray-400 mt-1 font-bold uppercase tracking-widest">{stack.provider.toUpperCase()}</p>
-                   </div>
-                </div>
-
-                <h3 className="text-lg font-bold text-gray-800 mb-2">{stack.name}</h3>
-                <p className="text-sm text-gray-500 leading-relaxed mb-6">{stack.description}</p>
-
-                <div className="flex flex-wrap gap-2 mb-6">
-                   {(Array.isArray(stack.services) ? stack.services : []).map(s => (
-                     <span key={s} className="px-2 py-1 bg-slate-50 text-slate-500 rounded text-[10px] font-mono border border-slate-100">
-                       {s}
-                     </span>
-                   ))}
-                </div>
-             </div>
-
-             <div className="px-6 py-4 border-t border-gray-50 bg-slate-50/30 flex items-center justify-between">
+    return (
+        <div className="p-6">
+            <div className="flex justify-between items-center mb-8">
                 <div>
-                   <p className="text-[10px] text-gray-400 uppercase font-bold tracking-widest leading-none">Min Cost</p>
-                   <p className="text-lg font-bold text-emerald-600">{formatValue(stack.est_cost)}<span className="text-[10px] text-gray-400">/mo</span></p>
+                    <h1 className="text-3xl font-bold flex items-center text-slate-800 dark:text-slate-100">
+                        <ShoppingBag className="mr-3 text-emerald-500" />
+                        Asset Marketplace
+                    </h1>
+                    <p className="text-slate-500 mt-1">Discover, download, and publish verified enterprise cloud assets.</p>
                 </div>
                 <button 
-                  onClick={() => setSelectedStack(stack)}
-                  className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-100 flex items-center gap-2"
+                    onClick={handlePublishClick}
+                    className="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 flex items-center shadow-sm"
                 >
-                   <Rocket size={14} />
-                   Configure
+                    <ShieldCheck size={18} className="mr-2" /> Publish Asset
                 </button>
-             </div>
-          </div>
-        ))}
-      </div>
+            </div>
 
-      {/* Deployment Modal */}
-      {selectedStack && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-             <div className="p-6 bg-indigo-600 text-white flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                   {getIcon(selectedStack.icon)}
-                   <h3 className="text-lg font-bold">{selectedStack.name}</h3>
+            <div className="flex flex-col md:flex-row gap-4 mb-8">
+                <div className="relative flex-1">
+                    <Search className="absolute left-3 top-3 text-slate-400" size={18} />
+                    <input 
+                        type="text" 
+                        placeholder="Search for templates, blueprints, or packs..." 
+                        className="w-full pl-10 pr-4 py-2 border dark:border-slate-700 rounded-md bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-emerald-500"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                    />
                 </div>
-                <button onClick={() => setSelectedStack(null)} className="p-2 hover:bg-white/20 rounded-lg">
-                   <RefreshCw className="w-5 h-5 rotate-45" />
-                </button>
-             </div>
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                    {categories.map(cat => (
+                        <button
+                            key={cat}
+                            onClick={() => setActiveCategory(cat)}
+                            className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+                                activeCategory === cat 
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' 
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                            }`}
+                        >
+                            {cat}
+                        </button>
+                    ))}
+                </div>
+            </div>
 
-             <div className="p-8 space-y-6">
-                <div>
-                   <label className="text-xs font-bold text-gray-400 uppercase tracking-widest block mb-2">Select Target Cloud</label>
-                   <select 
-                     value={targetAccount}
-                     onChange={(e) => setTargetAccount(e.target.value)}
-                     className="w-full px-4 py-3 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none font-medium text-gray-800"
-                   >
-                     <option value="">Operational Boundary...</option>
-                     {accounts.map(acc => (
-                       <option key={acc.id} value={acc.id}>{acc.name} ({acc.provider.toUpperCase()})</option>
-                     ))}
-                   </select>
+            {loading ? (
+                <div className="text-center py-12 text-slate-500">Loading marketplace assets...</div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {items.map(item => (
+                        <div key={item.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 hover:shadow-md transition-shadow overflow-hidden flex flex-col">
+                            <div className="h-32 bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-800 flex items-center justify-center border-b dark:border-slate-700">
+                                {/* Placeholder for Item Logo */}
+                                <ShoppingBag size={48} className="text-slate-300 dark:text-slate-600" />
+                            </div>
+                            <div className="p-5 flex-1 flex flex-col">
+                                <div className="flex justify-between items-start mb-2">
+                                    <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 line-clamp-1">{item.name}</h3>
+                                    <div className="flex items-center text-amber-500 bg-amber-50 dark:bg-amber-900/20 px-2 py-0.5 rounded text-xs font-bold">
+                                        <Star size={12} className="mr-1 fill-current" />
+                                        {item.average_rating.toFixed(1)}
+                                    </div>
+                                </div>
+                                <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400 mb-3">{item.category}</p>
+                                <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2 mb-4 flex-1">
+                                    {item.description}
+                                </p>
+                                <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-3 border-t dark:border-slate-700">
+                                    <div className="flex items-center">
+                                        <CheckCircle size={14} className="mr-1 text-blue-500" />
+                                        {item.publisher}
+                                    </div>
+                                    <div className="flex items-center">
+                                        <Download size={14} className="mr-1" />
+                                        {item.download_count}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                    
+                    {items.length === 0 && (
+                        <div className="col-span-full text-center py-12 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-dashed dark:border-slate-700">
+                            <p className="text-slate-500">No assets found matching your criteria.</p>
+                        </div>
+                    )}
                 </div>
-
-                <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 flex items-center gap-4">
-                   <div className="p-2 bg-emerald-100 text-emerald-600 rounded-xl">
-                      <CreditCard size={20} />
-                   </div>
-                   <div>
-                      <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-widest">Est. Monthly Impact</p>
-                      <p className="text-xl font-bold text-gray-900">{formatValue(selectedStack.est_cost)}</p>
-                   </div>
-                </div>
-
-                {/* 🧬 Tactical Wizard: Editable Config 🧬 */}
-                <div className="space-y-4">
-                   <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Mission Parameters</h4>
-                   <div className="grid grid-cols-1 gap-3">
-                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                         <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Cluster / Stack Name</label>
-                         <input 
-                           type="text" 
-                           defaultValue={selectedStack.stack_id + "-prod"}
-                           id="mission_name"
-                           className="w-full bg-transparent border-none outline-none text-sm font-bold text-slate-800"
-                         />
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                         <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Instance Type</label>
-                            <select id="instance_type" className="w-full bg-transparent border-none outline-none text-xs font-bold text-slate-800">
-                               <option value="t3.medium">t3.medium (Standard)</option>
-                               <option value="t3.large">t3.large (Performance)</option>
-                               <option value="m5.large">m5.large (Balanced)</option>
-                            </select>
-                         </div>
-                         <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Node Count</label>
-                            <input 
-                               type="number" 
-                               defaultValue="2"
-                               id="node_count"
-                               className="w-full bg-transparent border-none outline-none text-xs font-bold text-slate-800"
-                            />
-                         </div>
-                      </div>
-                   </div>
-                </div>
-
-                <div className="pt-4 flex gap-3">
-                   <button 
-                     onClick={() => setSelectedStack(null)}
-                     className="flex-1 py-3 rounded-2xl border border-gray-200 text-gray-500 font-bold text-sm hover:bg-gray-50 transition"
-                   >
-                      Cancel
-                   </button>
-                   <button 
-                     onClick={handleDeploy}
-                     disabled={deploying}
-                     className="flex-1 py-3 rounded-2xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700 transition shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"
-                   >
-                      {deploying ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle size={16} />}
-                      {deploying ? 'Provisioning...' : 'Launch Mission'}
-                   </button>
-                </div>
-             </div>
-          </div>
+            )}
         </div>
-      )}
-    </div>
-  );
+    );
 };
 
 export default Marketplace;

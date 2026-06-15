@@ -22,6 +22,22 @@ def update_schema():
                 else:
                     print(f"Error adding {col_name}: {e}")
         
+        print("Ensuring columns exist in deployments...")
+        dep_cols = [
+            ("has_drift", 'INT DEFAULT 0'),
+            ("drift_summary", 'TEXT')
+        ]
+        
+        for col_name, col_type in dep_cols:
+            try:
+                conn.execute(text(f"ALTER TABLE deployments ADD COLUMN {col_name} {col_type}"))
+                print(f"Added column: {col_name} to deployments")
+            except Exception as e:
+                if "Duplicate column name" in str(e):
+                    print(f"Column {col_name} already exists in deployments.")
+                else:
+                    print(f"Error adding {col_name} to deployments: {e}")
+                    
         conn.commit()
     print("Schema update completed.")
 

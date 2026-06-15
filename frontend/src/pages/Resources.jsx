@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Server, Search, Filter, Monitor, Database, Globe, RefreshCw, Play, Square, Trash2, Activity, Terminal, Layout, ShieldAlert, MonitorCheck, HelpCircle, Plus, ShieldCheck } from 'lucide-react';
+import { Server, Search, Filter, Monitor, Database, Globe, RefreshCw, Play, Square, Trash2, Activity, Terminal, Layout, ShieldAlert, MonitorCheck, HelpCircle, Plus, ShieldCheck, DollarSign, Brain } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useCurrency } from '../context/CurrencyContext';
@@ -9,93 +9,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 
-const TerminalInstance = ({ resourceId, fontSize = 13 }) => {
-  const terminalRef = React.useRef(null);
-  const xtermInstance = React.useRef(null);
-  
-  React.useEffect(() => {
-    if (xtermInstance.current) {
-      xtermInstance.current.options.fontSize = fontSize;
-      return;
-    }
 
-    let term;
-    let socket;
-    
-    try {
-      term = new XTerm({
-        cursorBlink: true,
-        fontSize: fontSize,
-        fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, "Courier New", monospace',
-        allowProposedApi: true,
-        theme: {
-          background: '#0f172a',
-          foreground: '#e2e8f0',
-          cursor: '#10b981'
-        },
-        convertEol: true,
-        lineHeight: 1.2,
-      });
-      
-      xtermInstance.current = term;
-      const fitAddon = new FitAddon();
-      term.loadAddon(fitAddon);
-      term.open(terminalRef.current);
-      
-      // Ensure absolute left alignment to fix "middle show" issues
-      const termEl = terminalRef.current.querySelector('.xterm-screen');
-      if (termEl) termEl.style.textAlign = 'left';
-
-      fitAddon.fit();
-
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      let wsUrl = `${protocol}//${window.location.hostname}:8085/api/v1/resources/ws/terminal/${resourceId}`;
-      
-      // Inject mission credentials into the bridge handshake
-      if (terminalAuth.username) {
-        wsUrl += `?username=${encodeURIComponent(terminalAuth.username)}`;
-        if (terminalAuth.authType === 'key' && terminalAuth.privateKey) {
-          wsUrl += `&private_key=${encodeURIComponent(terminalAuth.privateKey)}`;
-        } else if (terminalAuth.password) {
-          wsUrl += `&password=${encodeURIComponent(terminalAuth.password)}`;
-        }
-      }
-      
-      socket = new WebSocket(wsUrl);
-
-      socket.onmessage = (event) => term.write(event.data);
-      socket.onclose = () => term.write('\r\n[DISCONNECTED] Mission connection terminated.\r\n');
-      socket.onerror = () => term.write('\r\n[ERROR] WebSocket uplink failure.\r\n');
-
-      term.onData(data => {
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(data);
-        }
-      });
-      
-      const handleResize = () => fitAddon.fit();
-      window.addEventListener('resize', handleResize);
-      
-      return () => {
-        window.removeEventListener('resize', handleResize);
-        if (socket) socket.close();
-        if (term) term.dispose();
-      };
-    } catch (err) {
-      console.error("Terminal initialization failed:", err);
-    }
-  }, [resourceId]);
-
-  return (
-    <div className="w-full h-[500px] bg-[#0f172a] rounded-2xl overflow-hidden p-4 border border-slate-800 shadow-2xl relative">
-      <div ref={terminalRef} className="w-full h-full" />
-      <div className="absolute top-4 right-6 flex items-center gap-2">
-        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Live Secure Uplink</span>
-      </div>
-    </div>
-  );
-};
 
 const Resources = () => {
   const { formatValue } = useCurrency();
@@ -125,17 +39,146 @@ const Resources = () => {
   const [terminalAuth, setTerminalAuth] = useState({ username: '', password: '', privateKey: '', authType: 'password' });
   const [isRescuing, setIsRescuing] = useState(false);
   const [showRescue, setShowRescue] = useState(false);
+  const [showDriftAuditor, setShowDriftAuditor] = useState(false);
+  const [deployments, setDeployments] = useState([]);
+  const [drifting, setDrifting] = useState({}); // deployment_id: boolean
+  const [healing, setHealing] = useState({}); // deployment_id: boolean
+
+  const TerminalInstance = ({ resourceId, fontSize = 13 }) => {
+    const terminalRef = React.useRef(null);
+    const xtermInstance = React.useRef(null);
+    
+    React.useEffect(() => {
+      if (xtermInstance.current) {
+        xtermInstance.current.options.fontSize = fontSize;
+        return;
+      }
+
+      let term;
+      let socket;
+      
+      try {
+        term = new XTerm({
+          cursorBlink: true,
+          fontSize: fontSize,
+          fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, "Courier New", monospace',
+          allowProposedApi: true,
+          theme: {
+            background: '#0f172a',
+            foreground: '#e2e8f0',
+            cursor: '#10b981'
+          },
+          convertEol: true,
+          lineHeight: 1.2,
+        });
+        
+        xtermInstance.current = term;
+        const fitAddon = new FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(terminalRef.current);
+        
+        // Ensure absolute left alignment to fix "middle show" issues
+        const termEl = terminalRef.current.querySelector('.xterm-screen');
+        if (termEl) termEl.style.textAlign = 'left';
+
+        fitAddon.fit();
+
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        let wsUrl = `${protocol}//${window.location.hostname}:8085/api/v1/resources/ws/terminal/${resourceId}`;
+        
+        // Inject mission credentials into the bridge handshake
+        if (terminalAuth.username) {
+          wsUrl += `?username=${encodeURIComponent(terminalAuth.username)}`;
+          if (terminalAuth.authType === 'key' && terminalAuth.privateKey) {
+            wsUrl += `&private_key=${encodeURIComponent(terminalAuth.privateKey)}`;
+          } else if (terminalAuth.password) {
+            wsUrl += `&password=${encodeURIComponent(terminalAuth.password)}`;
+          }
+        }
+        
+        socket = new WebSocket(wsUrl);
+
+        socket.onmessage = (event) => term.write(event.data);
+        socket.onclose = () => term.write('\r\n[DISCONNECTED] Mission connection terminated.\r\n');
+        socket.onerror = () => term.write('\r\n[ERROR] WebSocket uplink failure.\r\n');
+
+        term.onData(data => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(data);
+          }
+        });
+        
+        const handleResize = () => fitAddon.fit();
+        window.addEventListener('resize', handleResize);
+        
+        return () => {
+          window.removeEventListener('resize', handleResize);
+          if (socket) socket.close();
+          if (term) term.dispose();
+        };
+      } catch (err) {
+        console.error("Terminal initialization failed:", err);
+      }
+    }, [resourceId]);
+
+    return (
+      <div className="w-full h-[500px] bg-[#0f172a] rounded-2xl overflow-hidden p-4 border border-slate-800 shadow-2xl relative">
+        <div ref={terminalRef} className="w-full h-full" />
+        <div className="absolute top-4 right-6 flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Live Secure Uplink</span>
+        </div>
+      </div>
+    );
+  };
+
+  const fetchDeployments = async () => {
+    try {
+      const res = await api.get('/deployments');
+      setDeployments(res.data);
+    } catch (err) {
+      console.error("Failed to fetch deployments:", err);
+    }
+  };
+
+  const fetchAccounts = async () => {
+    try {
+      const res = await api.get('/cloud-accounts/');
+      setCloudAccounts(res.data);
+    } catch (err) {
+      console.error("Failed to fetch cloud accounts:", err);
+    }
+  };
+
+  const handleCheckDrift = async (deploymentId) => {
+    setDrifting(prev => ({ ...prev, [deploymentId]: true }));
+    try {
+      const res = await api.get(`/terraform/drift/${deploymentId}`);
+      await fetchDeployments();
+      alert(res.data.summary);
+    } catch (err) {
+      alert("Drift Audit Failed: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setDrifting(prev => ({ ...prev, [deploymentId]: false }));
+    }
+  };
+
+  const handleHealDrift = async (deploymentId) => {
+    if (!window.confirm("⚠️ HEAL MISSION: This will re-apply the source blueprints to resolve the detected drift. This may restart services. Proceed?")) return;
+    setHealing(prev => ({ ...prev, [deploymentId]: true }));
+    try {
+      await api.post(`/terraform/heal/${deploymentId}`);
+      alert("Heal mission initiated. Blueprints are being reconciled.");
+    } catch (err) {
+      alert("Heal Mission Failed: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setHealing(prev => ({ ...prev, [deploymentId]: false }));
+    }
+  };
 
   useEffect(() => {
-    const fetchAccounts = async () => {
-      try {
-        const res = await api.get('/cloud-accounts');
-        setCloudAccounts(res.data);
-      } catch (err) {
-        console.error(err);
-      }
-    };
     fetchAccounts();
+    fetchDeployments();
   }, []);
 
   const [migrationTarget, setMigrationTarget] = useState('');
@@ -1362,6 +1405,13 @@ const Resources = () => {
             </div>
           )}
           <button 
+            onClick={() => { fetchDeployments(); setShowDriftAuditor(true); }}
+            className="flex items-center px-4 py-2 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 transition shadow-sm font-bold text-xs uppercase tracking-widest"
+          >
+            <ShieldAlert className="w-4 h-4 mr-2" />
+            IaC Drift Auditor
+          </button>
+          <button 
             onClick={handleSync}
             disabled={!canManage || isSyncing}
             className={`flex items-center px-4 py-2 rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition shadow-sm disabled:opacity-50 ${!canManage ? 'cursor-not-allowed' : ''}`}
@@ -1569,6 +1619,85 @@ const Resources = () => {
           </table>
         </div>
       </div>
+      {/* Drift Auditor Modal */}
+      {showDriftAuditor && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 border border-slate-200">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-rose-600 text-white">
+               <div className="flex items-center gap-3">
+                  <ShieldAlert className="w-5 h-5" />
+                  <div>
+                     <h3 className="text-lg font-bold">IaC Drift Auditor</h3>
+                     <p className="text-[10px] text-rose-100 uppercase font-bold tracking-widest">Reconciling Source of Truth vs Live State</p>
+                  </div>
+               </div>
+               <button onClick={() => setShowDriftAuditor(false)} className="hover:bg-white/20 p-1 rounded-lg">
+                 <Trash2 className="w-5 h-5 rotate-45" />
+               </button>
+            </div>
+            
+            <div className="p-8 max-h-[70vh] overflow-y-auto">
+              <div className="space-y-4">
+                {deployments.length === 0 ? (
+                  <p className="text-center py-12 text-gray-400 italic">No managed infrastructure deployments detected.</p>
+                ) : deployments.map(d => (
+                  <div key={d.id} className={`p-5 rounded-2xl border transition-all ${d.has_drift ? 'bg-rose-50/50 border-rose-100' : 'bg-slate-50 border-slate-100'}`}>
+                    <div className="flex justify-between items-start">
+                      <div className="flex gap-4">
+                        <div className={`p-3 rounded-xl bg-white shadow-sm border ${d.has_drift ? 'border-rose-200 text-rose-600' : 'border-slate-200 text-slate-400'}`}>
+                          <Layout size={20} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-black text-gray-800">{d.template?.name || 'Manual Deployment'}</p>
+                          <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{d.cloud_account?.provider} • {d.cloud_account?.name}</p>
+                          <div className="mt-2 flex gap-2">
+                             {d.has_drift ? (
+                               <span className="px-2 py-0.5 bg-rose-600 text-white rounded text-[9px] font-black uppercase tracking-tighter">Drift Detected</span>
+                             ) : (
+                               <span className="px-2 py-0.5 bg-emerald-500 text-white rounded text-[9px] font-black uppercase tracking-tighter">Synchronized</span>
+                             )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => handleCheckDrift(d.id)}
+                          disabled={drifting[d.id] || healing[d.id]}
+                          className="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 rounded-lg text-[10px] font-bold hover:bg-gray-50 transition flex items-center gap-2 disabled:opacity-50"
+                        >
+                          <RefreshCw size={12} className={drifting[d.id] ? 'animate-spin' : ''} />
+                          {drifting[d.id] ? 'Auditing...' : 'Audit Drift'}
+                        </button>
+                        {d.has_drift === 1 && (
+                          <button 
+                            onClick={() => handleHealDrift(d.id)}
+                            disabled={healing[d.id]}
+                            className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-[10px] font-bold hover:bg-indigo-700 transition flex items-center gap-2 shadow-lg shadow-indigo-100"
+                          >
+                            <RefreshCw size={12} className={healing[d.id] ? 'animate-spin' : ''} />
+                            {healing[d.id] ? 'Healing...' : 'Heal to Code'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {d.has_drift === 1 && d.drift_summary && (
+                       <div className="mt-4 p-3 bg-black/5 rounded-xl font-mono text-[10px] text-rose-700 whitespace-pre-wrap border border-rose-100/50">
+                          {d.drift_summary}
+                       </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <div className="p-6 bg-slate-50 border-t border-gray-100 flex justify-end">
+               <button onClick={() => setShowDriftAuditor(false)} className="px-6 py-2 bg-white border border-gray-200 text-gray-600 font-bold rounded-xl hover:bg-gray-50 transition">
+                  Close Dashboard
+               </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

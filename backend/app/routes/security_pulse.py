@@ -53,9 +53,21 @@ def get_security_stats(
     }
 
 @router.get("/forensics")
-def get_forensic_artifacts(
+def get_forensic_vault(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_viewer)
 ):
-    """Retrieve high-fidelity forensic artifacts and evidence trails."""
+    """Fetch high-fidelity forensic audit trails."""
+    from app.services.forensic_service import forensic_service
     return forensic_service.get_evidence_vault(db, current_user.id)
+
+@router.post("/forensics/verify")
+def verify_forensic_artifact(
+    artifact_id: str,
+    hash_value: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_viewer)
+):
+    """Verify the integrity of a secured forensic artifact."""
+    from app.services.forensic_service import forensic_service
+    return forensic_service.verify_artifact(artifact_id, hash_value)

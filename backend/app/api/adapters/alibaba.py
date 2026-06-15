@@ -4,9 +4,31 @@ from app.api.adapters.base import BaseCloudAdapter
 from app.models.cloud_account import CloudAccount
 from app.utils.retry import universal_retry
 
+from app.core.crypto import decrypt_credentials
+import json
+
 logger = logging.getLogger(__name__)
 
+def _get_ali_libs():
+    try:
+        from aliyunsdkcore.client import AcsClient
+        from aliyunsdkecs.request.v20140526.DescribeInstancesRequest import DescribeInstancesRequest
+        return AcsClient, DescribeInstancesRequest
+    except ImportError:
+        logger.error("Alibaba SDK not found. Functionality will be simulated.")
+        return None, None
+
 class AlibabaAdapter(BaseCloudAdapter):
+    def _get_client(self, account: CloudAccount):
+        AcsClient, _ = _get_ali_libs()
+        if not AcsClient: return None
+        creds = decrypt_credentials(account.encrypted_credentials)
+        return AcsClient(
+            creds.get('access_key'),
+            creds.get('secret_key'),
+            creds.get('region', 'cn-hangzhou')
+        )
+
     @property
     def provider_id(self) -> str:
         return "alibaba"

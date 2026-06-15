@@ -213,3 +213,56 @@ def get_pod_logs(resource_id: int, namespace: str, pod_name: str, db: Session = 
         return {"logs": f"Error fetching logs: {str(e)}"}
     finally:
         if os.path.exists(kubeconfig): os.remove(kubeconfig)
+
+@router.post("/action")
+def execute_k8s_action(
+    payload: Dict,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_viewer)
+):
+    """Execute a tactical action on a Kubernetes resource (pod/deployment)."""
+    resource_id = payload.get("resource_id")
+    action = payload.get("action")  # 'restart', 'scale', 'delete'
+    namespace = payload.get("namespace", "default")
+    resource_name = payload.get("resource_name")
+    
+    if not all([resource_id, action, resource_name]):
+        raise HTTPException(status_code=400, detail="Missing mission parameters")
+
+    resource = db.query(Resource).filter(Resource.id == resource_id).first()
+    account = db.query(CloudAccount).filter(CloudAccount.id == resource.cloud_account_id).first()
+    
+    creds = decrypt_credentials(account.encrypted_credentials)
+    env = os.environ.copy()
+    if account.provider == 'aws':
+        region = str(resource.region or "us-east-1")
+        env["AWS_ACCESS_KEY_ID"] = str(creds.get('aws_access_key') or creds.get('aws_access_key_id') or "")
+        env["AWS_SECRET_ACCESS_KEY"] = str(creds.get('aws_secret_key') or creds.get('aws_secret_access_key') or "")
+        env["AWS_DEFAULT_REGION"] = region
+    elif account.provider == 'azure':
+        env["ARM_CLIENT_ID"] = str(creds.get('client_id') or "")
+        env["ARM_CLIENT_SECRET"] = str(creds.get('client_secret') or "")
+        env["ARM_TENANT_ID"] = str(creds.get('tenant_id') or "")
+
+    kubeconfig = get_cluster_kubeconfig(db, resource_id, account)
+    
+    try:
+        if action == 'restart':
+            # 🔄 Restart deployment to trigger rollout
+            cmd = ["/usr/local/bin/kubectl", "rollout", "restart", f"deployment/{resource_name}", "-n", namespace, "--kubeconfig", kubeconfig]
+        elif action == 'delete':
+            # 🗑️ Force delete pod
+            cmd = ["/usr/local/bin/kubectl", "delete", "pod", resource_name, "-n", namespace, "--kubeconfig", kubeconfig]
+        elif action == 'scale':
+            replicas = payload.get("replicas", 1)
+            cmd = ["/usr/local/bin/kubectl", "scale", f"deployment/{resource_name}", "--replicas", str(replicas), "-n", namespace, "--kubeconfig", kubeconfig]
+        else:
+            return {"status": "error", "message": "Unsupported action protocol"}
+
+        result = subprocess.run(cmd, env=env, capture_output=True, text=True, check=True)
+        return {"status": "success", "message": f"K8s Action {action} executed on {resource_name}", "details": result.stdout}
+    except subprocess.CalledProcessError as e:
+        logger.error(f"K8s Action Failed: {e.stderr}")
+        return {"status": "error", "message": f"K8s Action Failed: {e.stderr}"}
+    finally:
+        if os.path.exists(kubeconfig): os.remove(kubeconfig)

@@ -808,3 +808,27 @@ class AWSAdapter(BaseCloudAdapter):
             return {'status': 'success', 'message': f'Resource {resource_external_id} registered to Target Group.'}
         except Exception as e:
             return {'status': 'error', 'message': str(e)}
+
+    def get_peering_links(self, account: CloudAccount) -> List[Dict]:
+        """Discover simulated cross-cloud peering links."""
+        return [
+            {
+                "id": "pcx-sovereign-01",
+                "source_vpc": "vpc-0123456789abcdef0",
+                "target_network": "Azure-VNet-East",
+                "type": "Cross-Cloud Peering",
+                "status": "active"
+            }
+        ]
+
+    def get_vpn_links(self, account: CloudAccount) -> List[Dict]:
+        """Discover simulated VPN tunnels."""
+        return [
+            {
+                "id": "vpn-01",
+                "source": "us-east-1",
+                "target": "On-Prem-DC",
+                "type": "S2S VPN",
+                "status": "active"
+            }
+        ]

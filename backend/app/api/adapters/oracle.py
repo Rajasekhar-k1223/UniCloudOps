@@ -1,9 +1,38 @@
+import logging
 from typing import List, Dict, Optional
 from app.api.adapters.base import BaseCloudAdapter
 from app.models.cloud_account import CloudAccount
 from app.utils.retry import universal_retry
+from app.core.crypto import decrypt_credentials
+import json
+
+logger = logging.getLogger(__name__)
+
+def _get_oci_libs():
+    try:
+        import oci
+        return oci
+    except ImportError:
+        logger.error("OCI SDK not found. Functionality will be simulated.")
+        return None
 
 class OCIAdapter(BaseCloudAdapter):
+    def _get_config(self, account: CloudAccount):
+        creds_str = decrypt_credentials(account.encrypted_credentials)
+        try:
+            creds = json.loads(creds_str)
+        except:
+            # Fallback if it's not JSON
+            return None
+            
+        return {
+            "user": creds.get('user_ocid'),
+            "key_content": creds.get('private_key'),
+            "fingerprint": creds.get('fingerprint'),
+            "tenancy": creds.get('tenancy_ocid'),
+            "region": creds.get('region', 'us-ashburn-1')
+        }
+
     @property
     def provider_id(self) -> str:
         return "oci"

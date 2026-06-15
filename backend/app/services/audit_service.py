@@ -41,6 +41,11 @@ class AuditService:
         )
         db.add(log_entry)
         db.commit()
+
+        # ⛓️ Anchor in Cryptographic Merkle Tree ⛓️
+        from app.services.merkle_service import merkle_service
+        merkle_service.add_leaf(integrity_hash)
+        
         return log_entry
 
     @staticmethod

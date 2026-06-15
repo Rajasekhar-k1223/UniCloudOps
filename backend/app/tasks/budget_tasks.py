@@ -65,7 +65,7 @@ def sync_all_project_budgets():
 def _engage_mission_recall(db, project):
     """Hibernates all resources in a project to stop fiscal leakage."""
     from app.models.resource import Resource
-    resources = db.query(Resource).filter(Resource.project_id == project.id).all()
+    resources = db.query(Resource).join(CloudAccount).filter(CloudAccount.project_id == project.id).all()
     logger.info(f"🚀 Mission Recall engaged for Project '{project.name}'. Hibernating {len(resources)} resources...")
     
     for res in resources:

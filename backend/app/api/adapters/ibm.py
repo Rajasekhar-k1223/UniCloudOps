@@ -4,9 +4,30 @@ from app.api.adapters.base import BaseCloudAdapter
 from app.models.cloud_account import CloudAccount
 from app.utils.retry import universal_retry
 
+from app.core.crypto import decrypt_credentials
+import json
+
 logger = logging.getLogger(__name__)
 
+def _get_ibm_libs():
+    try:
+        from ibm_vpc import VpcV1
+        from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
+        return VpcV1, IAMAuthenticator
+    except ImportError:
+        logger.error("IBM VPC SDK not found. Functionality will be simulated.")
+        return None, None
+
 class IBMAdapter(BaseCloudAdapter):
+    def _get_client(self, account: CloudAccount):
+        VpcV1, IAMAuthenticator = _get_ibm_libs()
+        if not VpcV1: return None
+        creds = decrypt_credentials(account.encrypted_credentials)
+        authenticator = IAMAuthenticator(creds.get('ibmcloud_api_key'))
+        client = VpcV1(authenticator=authenticator)
+        client.set_service_url('https://us-south.iaas.cloud.ibm.com/v1')
+        return client
+
     @property
     def provider_id(self) -> str:
         return "ibm"

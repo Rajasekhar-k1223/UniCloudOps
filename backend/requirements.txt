@@ -3,7 +3,7 @@ uvicorn[standard]==0.27.1
 SQLAlchemy==2.0.25
 PyMySQL==1.1.0
 motor==3.5.1
-pymongo==4.7.2
+pymongo==4.8.0
 beanie==1.25.0
 pydantic[email]==2.6.1
 pydantic-settings==2.1.0
@@ -14,7 +14,7 @@ python-multipart==0.0.9
 celery==5.3.6
 redis==5.0.1
 docker==7.0.0
-cryptography==42.0.2
+cryptography==41.0.7
 boto3==1.34.40
 azure-identity==1.15.0
 azure-mgmt-compute==30.6.0
@@ -30,9 +30,14 @@ google-cloud-compute==1.47.0
 google-cloud-container==2.64.0
 google-cloud-functions==1.23.0
 google-cloud-resource-manager==1.12.3
-requests==2.31.0
+requests==2.34.1
 pytest==8.3.5
 paramiko==3.4.0
 azure-mgmt-monitor==6.0.2
 google-cloud-monitoring==2.19.0
 google-generativeai==0.5.2
+ibm-vpc==0.33.0
+ibm-cloud-sdk-core==3.24.4
+aliyun-python-sdk-core==2.16.0
+aliyun-python-sdk-ecs==4.24.82
+oci==2.122.0

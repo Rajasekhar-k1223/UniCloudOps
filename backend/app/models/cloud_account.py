@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.session import Base
@@ -15,6 +15,7 @@ class CloudAccount(Base):
     encrypted_credentials = Column(Text, nullable=False)
     
     status = Column(String(50), default="pending") # 'active', 'error', 'pending'
+    is_active = Column(Boolean, default=True, nullable=False)
     last_sync = Column(DateTime(timezone=True), nullable=True)
     error_message = Column(Text, nullable=True)
     

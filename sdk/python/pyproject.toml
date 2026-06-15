@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unicloudops-sdk"
+version = "2.0.0"
+authors = [
+  { name="UniCloudOps Enterprise", email="enterprise@unicloudops.com" },
+]
+description = "Official Python SDK for UniCloudOps Enterprise Edition"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+]
+dependencies = [
+    "requests>=2.28.0",
+    "pydantic>=2.0.0",
+    "tenacity>=8.2.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/unicloudops/sdk-python"
+"Bug Tracker" = "https://github.com/unicloudops/sdk-python/issues"

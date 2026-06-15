@@ -240,8 +240,17 @@ class ContaboAdapter(BaseCloudAdapter):
             db.close()
 
     def verify_connectivity(self, account: CloudAccount) -> Dict:
-        """Mock verification for simulation mode."""
-        return {"authenticated": True, "access": True, "note": "Simulation mode"}
+        """Verify credentials by attempting to retrieve an OAuth2 token from Contabo."""
+        try:
+            token = self._get_token(account)
+            if not token:
+                return {
+                    "authenticated": False, 
+                    "error": "Failed to retrieve OAuth2 token. Check Client ID, Client Secret, Username, or Password."
+                }
+            return {"authenticated": True, "access": True, "billing_access": True, "note": "Complete"}
+        except Exception as e:
+            return {"authenticated": False, "error": str(e)}
 
     def create_instance(self, name: str, region: str, instance_type: str, image_id: str, account: CloudAccount, **kwargs) -> Dict:
         """Provision a Contabo VPS (Simulation Mode)."""

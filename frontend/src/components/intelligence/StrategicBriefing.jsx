@@ -85,14 +85,59 @@ const StrategicBriefing = ({ projectId }) => {
             <p className="text-rose-400 font-bold uppercase text-[10px]">{error}</p>
           </div>
         ) : (
-          <div className="space-y-4 whitespace-pre-wrap">
+          <div className="space-y-6 whitespace-pre-wrap">
             {displayedText ? (
-              <div className="text-cyan-50/90 briefing-content">
-                {displayedText}
-                {index < (briefing?.briefing?.length || 0) && (
-                  <span className="inline-block w-1.5 h-3 bg-cyan-400 ml-1 animate-pulse" />
+              <>
+                <div className="text-cyan-50/90 briefing-content">
+                  {displayedText}
+                  {index < (briefing?.briefing?.length || 0) && (
+                    <span className="inline-block w-1.5 h-3 bg-cyan-400 ml-1 animate-pulse" />
+                  )}
+                </div>
+
+                {/* Tactical Remediation Plan */}
+                {briefing?.remediation_plan?.length > 0 && index >= briefing.briefing.length && (
+                  <div className="mt-8 border-t border-cyan-500/10 pt-6 animate-in fade-in slide-in-from-bottom-4 duration-1000">
+                    <h3 className="text-xs font-black text-rose-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                      <Shield className="w-3 h-3" /> Autonomous Remediation Plan
+                    </h3>
+                    <div className="space-y-3">
+                      {briefing.remediation_plan.map((action, i) => (
+                        <div key={i} className="p-4 bg-rose-500/5 border border-rose-500/10 rounded-xl flex justify-between items-center group hover:bg-rose-500/10 transition">
+                          <div className="space-y-1">
+                            <p className="text-[10px] font-black text-rose-400 uppercase">{action.policy_name} MISSION</p>
+                            <p className="text-white font-bold">{action.resource_name}</p>
+                            <p className="text-[9px] text-white/40 italic">{action.reason}</p>
+                          </div>
+                          <button 
+                            onClick={async () => {
+                              try {
+                                const btn = document.getElementById(`remediate-btn-${i}`);
+                                if (btn) btn.innerText = "EXECUTING...";
+                                await api.post('/intelligence/remediate', {
+                                  resource_id: action.resource_id,
+                                  policy_name: action.policy_name
+                                });
+                                if (btn) {
+                                  btn.innerText = "MISSION COMPLETE";
+                                  btn.className = "text-[9px] font-black px-3 py-1.5 bg-emerald-500 text-black rounded uppercase";
+                                }
+                              } catch (err) {
+                                console.error(err);
+                                alert("Remediation Mission Interrupted.");
+                              }
+                            }}
+                            id={`remediate-btn-${i}`}
+                            className="text-[9px] font-black px-3 py-1.5 bg-rose-500 text-black rounded uppercase hover:bg-rose-400 transition"
+                          >
+                            Execute Mitigation
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
-              </div>
+              </>
             ) : !loading && (
               <div className="flex flex-col items-center justify-center h-full opacity-40 py-10">
                 <Terminal size={32} className="mb-3" />

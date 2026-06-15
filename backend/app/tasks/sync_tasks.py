@@ -16,6 +16,10 @@ def sync_cloud_resources_logic(account_id: int, db: SessionLocal):
         logger.error(f"Account {account_id} not found")
         return
     
+    if not getattr(account, 'is_active', True):
+        logger.info(f"Skipping sync for paused account {account_id} ({account.name})")
+        return
+    
     account.last_sync = func.now()
     
     from app.api.adapters import get_adapter
@@ -141,7 +145,7 @@ def sync_cloud_resources(account_id: int):
 def sync_all_accounts():
     """Trigger sync for all linked cloud accounts."""
     db = SessionLocal()
-    accounts = db.query(CloudAccount).all()
+    accounts = db.query(CloudAccount).filter(CloudAccount.is_active == True).all()
     for account in accounts:
         sync_cloud_resources.delay(account.id)
     db.close()

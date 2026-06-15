@@ -166,6 +166,7 @@ def run_cdk_in_docker(template_content: str, env_vars: Dict[str, str], deploymen
             detach=True
         )
         
+        escaped_template = template_content.replace('"', '\\"')
         deployment_script = f"""#!/bin/sh
 set -e
 echo "🚀 CDK Mission Sequence Initiated: {op.upper()}"
@@ -174,7 +175,7 @@ cdk --version
 echo "🛡️ Blueprints validated. Synthesizing infrastructure..."
 # Note: In production, we'd need to handle project structure. 
 # For now, we assume the template is a standalone CDK app file.
-echo "{template_content.replace('"', '\\"')}" > app.js
+echo "{escaped_template}" > app.js
 cdk {op} --app "node app.js" --require-approval never --no-color
 echo "✅ CDK Mission Success."
 """

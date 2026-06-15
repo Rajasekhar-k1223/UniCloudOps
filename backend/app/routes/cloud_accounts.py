@@ -102,3 +102,15 @@ def get_account_identities(account_id: int, db: Session = Depends(get_db), curre
         raise HTTPException(status_code=404, detail="Account not found")
     
     return iam_service._get_aws_iam(account) if account.provider == 'aws' else iam_service._get_azure_ad(account)
+
+@router.post("/{account_id}/toggle", response_model=CloudAccountResponse)
+def toggle_cloud_account(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Toggle cloud account active/paused status (Pause/Resume)."""
+    account = db.query(CloudAccount).filter(CloudAccount.id == account_id, CloudAccount.user_id == current_user.id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    account.is_active = not getattr(account, 'is_active', True)
+    db.commit()
+    db.refresh(account)
+    return account

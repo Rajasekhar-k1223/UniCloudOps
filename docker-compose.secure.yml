@@ -1,0 +1,78 @@
+version: '3.8'
+
+# This is a highly hardened, production-grade Docker Compose file for UniCloudOps
+# It enforces non-root execution, drops Linux capabilities, and mounts read-only file systems.
+
+services:
+  db:
+    image: mysql:8.0
+    # Drop all capabilities except those strictly required
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    # Bind only to the internal overlay network, exposing no public ports
+    expose:
+      - "3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-secure-default}
+      MYSQL_DATABASE: unicloudops
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - unicloudops_network
+
+  redis:
+    image: redis:7.0-alpine
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Run as a specific unprivileged UID/GID (e.g. redis user in alpine)
+    user: "999:1000"
+    command: redis-server --requirepass ${REDIS_PASSWORD:-secure-redis}
+    expose:
+      - "6379"
+    networks:
+      - unicloudops_network
+
+  backend:
+    build: 
+      context: ./backend
+    # Enforce read-only root filesystem to prevent malware dropping
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app:ro # Mount code as read-only
+      - /tmp # Allow tmpfs for necessary temporary writes
+    environment:
+      - DATABASE_URL=mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-secure-default}@db/unicloudops
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-secure-redis}@redis:6379/0
+    depends_on:
+      - db
+      - redis
+    networks:
+      - unicloudops_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+
+volumes:
+  mysql_data:
+
+networks:
+  unicloudops_network:
+    driver: bridge
+    internal: false # In a pure prod env behind a WAF, this might be true depending on ingress design

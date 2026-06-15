@@ -128,7 +128,7 @@ class AzureAdapter(BaseCloudAdapter):
 
     def get_monthly_spend(self, account: Optional[CloudAccount] = None, refresh: bool = False) -> float:
         if not account: return 0.0
-        _, _, _, cost_client, _ = self._get_clients(account)
+        _, _, _, cost_client, _, _ = self._get_clients(account)
         if not cost_client: return 0.0
         
         try:
@@ -533,6 +533,7 @@ class AzureAdapter(BaseCloudAdapter):
                     "status": self._extract_status(comp, vm.id.split('/')[4], vm.name),
                     "public_ip": public_ip or "N/A",
                     "private_ip": private_ip or "N/A",
+                    "estimated_monthly_cost": round((self.get_price(vm.hardware_profile.vm_size) or 0.04) * 730.0, 2),
                     "cloud_metadata": sanitize_metadata(vm)
                 })
             return discovered
@@ -715,9 +716,15 @@ class AzureAdapter(BaseCloudAdapter):
             
             lock_key = f"azure_billing_lock_{sub_id}"
             with cache_service.lock(lock_key, timeout=30):
-                # Azure Query from Account Lifecycle Start (April 23)
+                # Dynamic billing trends range based on days parameter
                 from azure.mgmt.costmanagement.models import QueryTimePeriod
-                custom_period = QueryTimePeriod(from_property="2026-04-23T00:00:00Z", to="2026-05-31T23:59:59Z")
+                from datetime import date, timedelta
+                end_date = date.today()
+                start_date = end_date - timedelta(days=days)
+                custom_period = QueryTimePeriod(
+                    from_property=f"{start_date.strftime('%Y-%m-%d')}T00:00:00Z",
+                    to=f"{end_date.strftime('%Y-%m-%d')}T23:59:59Z"
+                )
                 
                 query = cost_client.query.usage(
                     scope=scope,
@@ -906,7 +913,7 @@ class AzureAdapter(BaseCloudAdapter):
         try:
             clients = self._get_clients(account)
             if not clients or len(clients) < 5: return []
-            _, _, _, _, web_client = clients
+            web_client = clients[4]
             
             functions = web_client.web_apps.list()
             results = []
@@ -950,3 +957,27 @@ class AzureAdapter(BaseCloudAdapter):
             return {'status': 'success', 'message': f'Azure Resource {resource_external_id} added to Backend Pool.'}
         except Exception as e:
             return {'status': 'error', 'message': str(e)}
+
+    def get_peering_links(self, account: CloudAccount) -> List[Dict]:
+        """Discover simulated Azure VNet peerings."""
+        return [
+            {
+                "id": "vnet-peering-01",
+                "source_vnet": "Azure-VNet-East",
+                "target_network": "AWS-VPC-Main",
+                "type": "Global VNet Peering",
+                "status": "Connected"
+            }
+        ]
+
+    def get_vpn_links(self, account: CloudAccount) -> List[Dict]:
+        """Discover simulated Azure VPN Gateway links."""
+        return [
+            {
+                "id": "gateway-connection-01",
+                "source": "eastus",
+                "target": "On-Prem-Branch",
+                "type": "IPsec VPN",
+                "status": "Succeeded"
+            }
+        ]

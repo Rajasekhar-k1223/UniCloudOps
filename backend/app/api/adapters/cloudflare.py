@@ -2,6 +2,7 @@ import logging
 from typing import List, Dict, Optional
 from app.api.adapters.base import BaseCloudAdapter
 from app.models.cloud_account import CloudAccount
+from app.core.crypto import decrypt_credentials
 
 logger = logging.getLogger(__name__)
 

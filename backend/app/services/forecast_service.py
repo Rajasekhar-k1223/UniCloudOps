@@ -50,4 +50,44 @@ class ForecastService:
         
         return processed_data
 
+    def get_project_forecast(self, db, project_id: int) -> Dict:
+        """
+        Calculate cost forecast and trajectory for a project mission.
+        """
+        from app.routes.billing import get_project_billing_data
+        billing_data = get_project_billing_data(project_id, db)
+        history = billing_data.get("history", [])
+        
+        if not history:
+            return {"forecast_7d": "N/A", "trajectory": "stable"}
+            
+        burn_up = self.calculate_burn_up(history)
+        
+        # Calculate 7-day forecast
+        forecast_points = [p for p in burn_up if p.get('is_forecast')]
+        if forecast_points:
+            forecast_7d = f"${forecast_points[-1]['forecast']:.2f}"
+            
+            # Trajectory calculation (compare first point in history with last forecast point)
+            first_spend = sum(v for k, v in history[0].items() if k != 'date')
+            last_forecast = forecast_points[-1]['forecast']
+            
+            if last_forecast > first_spend * 1.5:
+                trajectory = "high growth"
+            elif last_forecast > first_spend * 1.1:
+                trajectory = "moderate growth"
+            elif last_forecast < first_spend * 0.9:
+                trajectory = "declining"
+            else:
+                trajectory = "stable"
+        else:
+            forecast_7d = "N/A"
+            trajectory = "stable"
+            
+        return {
+            "forecast_7d": forecast_7d,
+            "trajectory": trajectory
+        }
+
 forecast_service = ForecastService()
+

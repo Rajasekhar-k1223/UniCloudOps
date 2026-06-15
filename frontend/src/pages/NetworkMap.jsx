@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Globe, Share2, Activity, Shield, Layers, RefreshCw, Zap, Server, Box, Cpu, HardDrive, Wifi, Lock, ExternalLink } from 'lucide-react';
 import api from '../services/api';
 import clsx from 'clsx';
+import HolographicGlobe from '../components/intelligence/HolographicGlobe';
 
 const NetworkMap = () => {
   const [topology, setTopology] = useState(null);
@@ -37,7 +38,7 @@ const NetworkMap = () => {
                </div>
                <div>
                   <span className="text-[10px] font-black uppercase tracking-[0.4em] text-indigo-400/70">Neural Operational Layer</span>
-                  <h1 className="text-4xl font-black text-white tracking-tight uppercase">Infrastructure <span className="text-slate-500">Visualizer</span></h1>
+                  <h1 className="text-4xl font-black text-white tracking-tight uppercase">Global <span className="text-slate-500">Mesh HQ</span></h1>
                </div>
             </div>
             <p className="text-slate-500 max-w-xl text-sm font-medium leading-relaxed italic">
@@ -80,40 +81,37 @@ const NetworkMap = () => {
                   perspective: '1000px'
                }} />
           
-          {/* Dynamic Laser Connection Lines (Background) */}
-          <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible opacity-30">
-             <defs>
-                <linearGradient id="laser" x1="0%" y1="0%" x2="100%" y2="0%">
-                   <stop offset="0%" stopColor="transparent" />
-                   <stop offset="50%" stopColor="#6366f1" />
-                   <stop offset="100%" stopColor="transparent" />
-                </linearGradient>
-             </defs>
-             {topology?.nodes?.length >= 2 && (
-                <line x1="30%" y1="50%" x2="70%" y2="50%" stroke="url(#laser)" strokeWidth="2" strokeDasharray="10 10">
-                   <animate attributeName="stroke-dashoffset" from="100" to="0" dur="3s" repeatCount="indefinite" />
-                </line>
-             )}
-          </svg>
-
           {loading ? (
              <div className="flex flex-col items-center gap-6 relative z-50">
                 <div className="w-20 h-20 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin shadow-2xl shadow-indigo-500/50" />
                 <span className="text-xs font-black uppercase tracking-[0.6em] text-white animate-pulse">Initializing_Neural_Mapping</span>
              </div>
           ) : topology ? (
-             <div className="relative w-full h-full flex flex-col md:flex-row items-center justify-center gap-32 p-20 z-20">
+             <div className="relative w-full h-full flex flex-col items-center justify-center gap-32 p-20 z-20">
                 
-                {/* Central Intelligence Core */}
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 rounded-full border border-white/10 flex items-center justify-center bg-white/[0.02] shadow-[0_0_100px_rgba(99,102,241,0.1)]">
-                   <div className="w-24 h-24 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center animate-pulse">
-                      <Zap className="text-indigo-400 w-10 h-10" />
-                   </div>
-                   {/* Orbiting particles */}
-                   <div className="absolute inset-0 animate-spin-slow">
-                      <div className="w-2 h-2 rounded-full bg-indigo-500 absolute -top-1 left-1/2 -translate-x-1/2 shadow-[0_0_10px_#6366f1]" />
-                   </div>
+                {/* 🌎 THE HOLOGRAPHIC GLOBE 🌎 */}
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
+                   <HolographicGlobe nodes={topology.nodes} />
                 </div>
+
+                {/* Tactical Links (Global Mesh) */}
+                <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible">
+                  {topology.links?.map((link, i) => (
+                    <g key={link.id}>
+                      <path 
+                        d="M 25% 50% Q 50% 10% 75% 50%" 
+                        fill="none" 
+                        stroke="url(#laser)" 
+                        strokeWidth="1" 
+                        strokeDasharray="5 5"
+                        className="opacity-20"
+                      />
+                      <circle r="3" fill="#6366f1" className="animate-ping">
+                        <animateMotion path="M 25% 50% Q 50% 10% 75% 50%" dur="4s" repeatCount="indefinite" />
+                      </circle>
+                    </g>
+                  ))}
+                </svg>
 
                 {topology.nodes.map((node, idx) => (
                    <div 

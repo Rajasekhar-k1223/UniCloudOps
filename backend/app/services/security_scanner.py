@@ -7,8 +7,8 @@ import random
 class SecurityScanner:
     @staticmethod
     def scan_project(db: Session, project_id: int) -> List[Dict]:
-        """Perform a tactical security sweep across all project resources."""
-        resources = db.query(Resource).filter(Resource.project_id == project_id).all()
+        from app.models.cloud_account import CloudAccount
+        resources = db.query(Resource).join(CloudAccount).filter(CloudAccount.project_id == project_id).all()
         findings = []
         
         for r in resources:

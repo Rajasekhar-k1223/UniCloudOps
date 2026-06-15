@@ -1,0 +1,22 @@
+# Docker ignore file
+**/.git
+**/.gitignore
+**/node_modules
+**/dist
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.db
+**/.pytest_cache
+**/.vscode
+**/.idea
+**/data
+**/data-backup-*
+**/db-backup
+**/logs.txt
+**/logs_utf8.txt
+backend/venv
+backend/.env
+frontend/node_modules
+frontend/dist

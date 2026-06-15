@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Shield, Activity, Globe, Zap, Server, MessageSquare, AlertTriangle, RefreshCw, BarChart, Maximize2, Minimize2, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, Shield, Activity, Globe, Zap, Server, MessageSquare, AlertTriangle, RefreshCw, BarChart, Maximize2, Minimize2, ShieldCheck, Brain } from 'lucide-react';
 import api from '../services/api';
 import '../styles/HolographicOverlay.css';
 import StrategicBriefing from '../components/intelligence/StrategicBriefing';
@@ -50,7 +50,7 @@ const CommandCenter = () => {
   };
 
   return (
-    <div className={`fixed inset-0 bg-[#0A0C10] text-[#00E5FF] z-[200] flex flex-col font-mono transition-all duration-700 ${isFullscreen ? 'p-0' : 'p-0'}`}>
+    <div className={`relative min-h-[calc(100vh-64px)] bg-[#0A0C10] text-[#00E5FF] flex flex-col font-mono transition-all duration-700`}>
       
       {/* Cinematic Header */}
       <header className="p-6 border-b border-[#00E5FF]/10 flex justify-between items-center bg-[#0D1117] relative overflow-hidden">

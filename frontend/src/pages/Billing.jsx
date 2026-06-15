@@ -57,27 +57,32 @@ const Billing = () => {
     return data;
   }, [trends, forecast]);
 
+  const [costSentinel, setCostSentinel] = useState({ status: 'ok', spikes: [] });
+
+  const fetchBillingData = async () => {
+    try {
+      const [trendsRes, historyRes, summaryRes, recsRes, forecastRes, sentinelRes] = await Promise.all([
+        api.get('/billing/trends?days=30'),
+        api.get('/billing/history?months=6'),
+        user?.project_id ? api.get(`/projects/${user.project_id}/summary`) : Promise.resolve({ data: null }),
+        api.get('/billing/recommendations'),
+        api.get('/billing/forecast?days=30'),
+        user?.project_id ? api.get(`/billing/sentinel/spikes/${user.project_id}`) : Promise.resolve({ data: { status: 'ok', spikes: [] } })
+      ]);
+      setTrends(trendsRes.data);
+      setHistory(historyRes.data);
+      setProjectSummary(summaryRes.data);
+      setRecommendations(recsRes.data);
+      setForecast(forecastRes.data);
+      setCostSentinel(sentinelRes.data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchBillingData = async () => {
-      try {
-        const [trendsRes, historyRes, summaryRes, recsRes, forecastRes] = await Promise.all([
-          api.get('/billing/trends?days=30'),
-          api.get('/billing/history?months=6'),
-          user?.project_id ? api.get(`/projects/${user.project_id}/summary`) : Promise.resolve({ data: null }),
-          api.get('/billing/recommendations'),
-          api.get('/billing/forecast?days=30')
-        ]);
-        setTrends(trendsRes.data);
-        setHistory(historyRes.data);
-        setProjectSummary(summaryRes.data);
-        setRecommendations(recsRes.data);
-        setForecast(forecastRes.data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchBillingData();
   }, [user?.project_id]);
 
@@ -136,12 +141,16 @@ const Billing = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <div className="glass-panel p-5 bg-white/50 border-white/40">
-           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Estimated Today (24h Latency)</p>
-           <p className="text-2xl font-bold text-gray-900">{formatValue(trends.length > 0 ? Object.keys(trends[trends.length-1]).reduce((sum, k) => k !== 'date' ? sum + trends[trends.length-1][k] : sum, 0) : 0)}</p>
-           <div className="mt-2 flex items-center gap-1 text-[10px] text-blue-600 font-bold uppercase tracking-tighter">
-              <Clock className="w-3 h-3" />
-              Live Cloud Pulse
+        <div className={`glass-panel p-5 border-2 ${costSentinel.status === 'critical' ? 'bg-rose-50 border-rose-200' : costSentinel.status === 'warning' ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+           <div className="flex justify-between items-start mb-1">
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Cost Velocity Sentinel</p>
+              <ShieldAlert className={`w-4 h-4 ${costSentinel.status === 'critical' ? 'text-rose-500 animate-pulse' : costSentinel.status === 'warning' ? 'text-amber-500' : 'text-emerald-500'}`} />
+           </div>
+           <p className={`text-2xl font-bold ${costSentinel.status === 'critical' ? 'text-rose-700' : costSentinel.status === 'warning' ? 'text-amber-700' : 'text-emerald-700'}`}>
+              {costSentinel.status.toUpperCase()}
+           </p>
+           <div className="mt-2 text-[10px] font-bold uppercase tracking-tighter text-gray-500">
+              {costSentinel.summary}
            </div>
         </div>
         <div className="glass-panel p-5 bg-white/50 border-white/40">
@@ -446,8 +455,8 @@ const Billing = () => {
             )}
           </div>
         </div>
-      </div>
-    </div>
+         </div>
+       </div>
   );
 };
 

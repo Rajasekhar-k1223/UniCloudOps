@@ -5,6 +5,7 @@ from datetime import datetime
 class CloudAccountBase(BaseModel):
     provider: str
     name: str
+    is_active: Optional[bool] = True
 
 class CloudAccountCreate(CloudAccountBase):
     credentials: dict # e.g. {"aws_access_key_id": "...", "aws_secret_access_key": "..."}

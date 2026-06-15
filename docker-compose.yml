@@ -38,6 +38,42 @@ services:
       timeout: 5s
       retries: 10
 
+  # --- NEW: Event Fabric Broker (NATS JetStream) ---
+  nats:
+    image: nats:2.10-alpine
+    container_name: unicloudops_nats
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"   # Client connections
+      - "8222:8222"   # HTTP Management
+    volumes:
+      - ./data/nats:/data/nats
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- NEW: Enterprise IAM (Keycloak) ---
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.1
+    container_name: unicloudops_keycloak
+    environment:
+      KC_DB: mysql
+      KC_DB_URL: jdbc:mysql://db:3306/unicloudops
+      KC_DB_USERNAME: appuser
+      KC_DB_PASSWORD: MySqlApp!2025#Secure
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: AdminPassword!2025
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+    command: start-dev
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
   # --- Multi-purpose Redis Broker ---
   redis:
     image: redis:7.0-alpine

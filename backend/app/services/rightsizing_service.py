@@ -7,8 +7,8 @@ import random
 class RightsizingEngine:
     @staticmethod
     def get_recommendations(db: Session, project_id: int) -> List[Dict]:
-        """Analyze project resources and generate cost-saving recommendations."""
-        resources = db.query(Resource).filter(Resource.project_id == project_id).all()
+        from app.models.cloud_account import CloudAccount
+        resources = db.query(Resource).join(CloudAccount).filter(CloudAccount.project_id == project_id).all()
         recommendations = []
         
         for r in resources:

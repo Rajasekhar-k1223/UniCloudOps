@@ -340,3 +340,28 @@ def purge_billing_cache(
         except: pass
     
     return {"status": "success", "message": f"Cache purged for {count} cloud subscriptions. Real-time sync initiated."}
+
+def get_project_billing_data(project_id: int, db: Session) -> Dict:
+    """Helper for internal services to fetch project-specific billing history without user context."""
+    from app.models.cloud_account import CloudAccount
+    accounts = db.query(CloudAccount).filter(CloudAccount.project_id == project_id).all()
+    if not accounts:
+        return {"history": []}
+    
+    from app.api.adapters import get_adapter
+    master_history = {}
+    for acc in accounts:
+        adapter = get_adapter(acc.provider)
+        if not adapter: continue
+        try:
+            provider_trends = adapter.get_daily_costs(days=30, account=acc)
+            for entry in provider_trends:
+                dt = entry['date']
+                if dt not in master_history:
+                    master_history[dt] = {"date": dt}
+                master_history[dt][acc.provider] = master_history[dt].get(acc.provider, 0) + entry.get(acc.provider, 0)
+        except: pass
+        
+    result = list(master_history.values())
+    result.sort(key=lambda x: x['date'])
+    return {"history": result}

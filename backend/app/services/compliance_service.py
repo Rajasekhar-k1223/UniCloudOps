@@ -8,8 +8,8 @@ logger = logging.getLogger(__name__)
 
 class ComplianceService:
     def run_guardrail_audit(self, db: Session, project_id: int) -> List[Dict]:
-        """Perform a tactical security and compliance audit on project resources."""
-        resources = db.query(Resource).filter(Resource.project_id == project_id).all()
+        from app.models.cloud_account import CloudAccount
+        resources = db.query(Resource).join(CloudAccount).filter(CloudAccount.project_id == project_id).all()
         findings = []
         
         for res in resources:

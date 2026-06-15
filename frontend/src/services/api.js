@@ -25,3 +25,14 @@ api.interceptors.request.use(
 );
 
 export default api;
+
+export const apiCall = async (url, options = {}) => {
+  const method = options.method || 'GET';
+  const response = await api({
+    url: url,
+    method: method,
+    data: options.body ? JSON.parse(options.body) : undefined,
+    headers: options.headers
+  });
+  return response.data;
+};

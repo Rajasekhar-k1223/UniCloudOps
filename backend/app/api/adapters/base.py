@@ -160,3 +160,11 @@ class BaseCloudAdapter(ABC):
     def apply_security_policy(self, resource_id: str, policy_name: str, region: str, account: CloudAccount) -> Dict:
         """Apply a predefined security policy to a resource (Default: unsupported)."""
         return {"status": "unsupported", "message": f"{self.provider_name} adapter does not support security policy remediation yet."}
+
+    def get_peering_links(self, account: CloudAccount) -> List[Dict]:
+        """Discover cross-network peering connections (Default: empty)."""
+        return []
+
+    def get_vpn_links(self, account: CloudAccount) -> List[Dict]:
+        """Discover site-to-site VPN or ExpressRoute/DirectConnect tunnels (Default: empty)."""
+        return []

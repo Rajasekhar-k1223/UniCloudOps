@@ -1,15 +1,38 @@
+import os
+import logging
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from app.core.config import settings
 
-engine = create_engine(
-    settings.DATABASE_URL, 
-    pool_pre_ping=True,
-    pool_size=20,          # Standard pool size for concurrent tasks
-    max_overflow=10,       # Allow surge connections
-    pool_recycle=1800,     # Recycle connections every 30m to avoid stale timeouts
-    pool_timeout=30        # Wait up to 30s for a connection from the pool
-)
+logger = logging.getLogger(__name__)
+
+db_url = settings.DATABASE_URL
+engine_args = {}
+
+if db_url.startswith("sqlite"):
+    engine_args = {"connect_args": {"check_same_thread": False}}
+else:
+    try:
+        # Test connection with a short timeout
+        temp_engine = create_engine(db_url, connect_args={"connect_timeout": 2})
+        with temp_engine.connect() as conn:
+            pass
+        temp_engine.dispose()
+        engine_args = {
+            "pool_pre_ping": True,
+            "pool_size": 20,
+            "max_overflow": 10,
+            "pool_recycle": 1800,
+            "pool_timeout": 30
+        }
+        logger.info("Database Engine: Connected to MySQL successfully.")
+    except Exception as e:
+        fallback_db_path = os.path.join(os.getcwd(), "unicloudops.db")
+        db_url = f"sqlite:///{fallback_db_path}"
+        engine_args = {"connect_args": {"check_same_thread": False}}
+        logger.warning(f"MySQL connection refused ({e}). Falling back to local SQLite: {db_url}")
+
+engine = create_engine(db_url, **engine_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
@@ -19,4 +42,7 @@ def get_db():
     try:
         yield db
     finally:
-        db.close()
+        try:
+            db.close()
+        except Exception:
+            pass
