@@ -38,15 +38,15 @@ jobs:
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
 
-      - name: Push to Registry
-        run: docker push my-registry.com/unicloudops/app:${{ github.sha }}
-        # Note: In a real pipeline, ensure docker login happens prior to this step
+      # - name: Push to Registry
+      #   run: docker push my-registry.com/unicloudops/app:${{ github.sha }}
+      #   # Note: In a real pipeline, ensure docker login happens prior to this step
 
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.1.1
+      # - name: Install Cosign
+      #   uses: sigstore/cosign-installer@v3.1.1
 
-      - name: Sign Image with Cosign (Keyless)
-        run: cosign sign --yes my-registry.com/unicloudops/app:${{ github.sha }}
+      # - name: Sign Image with Cosign (Keyless)
+      #   run: cosign sign --yes my-registry.com/unicloudops/app:${{ github.sha }}
         
       # The final step would normally curl the UniCloudOps backend /supply-chain API 
       # to upload the SBOM and register the successful signing event.
